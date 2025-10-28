@@ -1,0 +1,56 @@
+{
+  "name": "vite-webp-avif-generator",
+  "version": "1.2.0",
+  "description": "Vite plugin for automatic image conversion to WebP and AVIF formats in dev mode",
+  "author": "Karev G.S. <your.email@example.com>",
+  "license": "MIT",
+  "type": "module",
+  "main": "./vite-webp-avif-generator-plugin.js",
+  "types": "./vite-webp-avif-generator-plugin.d.ts",
+  "exports": {
+    ".": {
+      "types": "./vite-webp-avif-generator-plugin.d.ts",
+      "import": "./vite-webp-avif-generator-plugin.js"
+    }
+  },
+  "files": [
+    "vite-webp-avif-generator-plugin.js",
+    "vite-webp-avif-generator-plugin.d.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "vite",
+    "vite-plugin",
+    "webp",
+    "avif",
+    "image",
+    "image-conversion",
+    "image-optimizer",
+    "sharp",
+    "dev-tools"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/karevgs/vite-webp-avif-generator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/karevgs/vite-webp-avif-generator/issues"
+  },
+  "homepage": "https://github.com/karevgs/vite-webp-avif-generator#readme",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "peerDependencies": {
+    "vite": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0"
+  },
+  "dependencies": {
+    "chokidar": "^3.5.3 || ^4.0.0",
+    "sharp": "^0.32.0 || ^0.33.0 || ^0.34.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "prepublishOnly": "echo 'Ready to publish!'"
+  }
+}

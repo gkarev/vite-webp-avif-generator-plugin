@@ -1,0 +1,45 @@
+# Документация для разработки (не нужна в npm пакете)
+CODE-AUDIT.md
+AUDIT-REPORT.md
+AUDIT-SUMMARY.md
+FIXES-APPLIED.md
+FINAL-SUMMARY.md
+UPDATE-SUMMARY.md
+INDEX.md
+QUICKSTART.md
+EXAMPLES.md
+TECHNICAL.md
+.usage-summary.md
+
+# Руководства по публикации (не нужны пользователям)
+PUBLISHING-GUIDE.md
+PUBLISH-CHECKLIST.md
+PRE-PUBLISH-TEST.md
+READY-TO-PUBLISH.md
+NPM-README.md
+
+# Файлы для разработки
+.git
+.gitignore
+.npmignore
+node_modules
+*.log
+.DS_Store
+Thumbs.db
+
+# Тестовые файлы
+test/
+tests/
+__tests__/
+*.test.js
+*.spec.js
+
+# Конфигурационные файлы IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.md
+!README.md
+!CHANGELOG.md
