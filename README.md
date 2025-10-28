@@ -29,7 +29,7 @@ npm install -D vite-webp-avif-generator sharp chokidar
 ```javascript
 // vite.config.js
 import { defineConfig } from "vite";
-import convertImages from "vite-webp-avif-generator";
+import convertImages from "vite-webp-avif-generator-plugin";
 
 export default defineConfig({
   plugins: [
