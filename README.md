@@ -2,6 +2,10 @@
 
 > Production-ready Vite plugin for automatic image conversion to modern WebP and AVIF formats with real-time file watching
 
+**The Problem:** Modern image formats (WebP, AVIF) provide 30-50% better compression than JPG/PNG, but manually converting every image is tedious. Most image optimization tools only work at build time, forcing you to rebuild just to test converted images.
+
+**The Solution:** This plugin works in **dev mode** and converts images **instantly**. Drop a JPG into your project → WebP & AVIF versions appear in seconds. Use them immediately in your HTML/CSS without waiting for a build. Real-time conversion during development, automatic optimization for production.
+
 [![npm version](https://img.shields.io/npm/v/vite-webp-avif-generator-plugin.svg)](https://www.npmjs.com/package/vite-webp-avif-generator-plugin)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Vite](https://img.shields.io/badge/Vite-4%20%7C%205%20%7C%206%20%7C%207-646CFF?logo=vite)](https://vitejs.dev/)
