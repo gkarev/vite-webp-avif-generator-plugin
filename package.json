@@ -1,6 +1,6 @@
 {
   "name": "vite-webp-avif-generator-plugin",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Vite plugin for automatic image conversion to WebP and AVIF formats in dev mode",
   "author": "Karev G.S.",
   "license": "MIT",
