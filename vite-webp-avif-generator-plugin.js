@@ -1,7 +1,8 @@
-import { resolve, dirname, extname, basename, relative } from "path";
-import { existsSync } from "fs";
+import { resolve, dirname, extname, basename, relative, isAbsolute } from "path";
+import { access, constants } from "fs/promises";
 import sharp from "sharp";
 import chokidar from "chokidar";
+import { normalizePath } from "vite";
 
 /**
  * @typedef {Object} PluginConfig
@@ -35,15 +36,15 @@ export default function convertImages(config = {}) {
     },
 
     configureServer(server) {
-      const watchPaths = folders.map((folder) => resolve(rootDir, folder));
+      const watchPaths = validateFolders(folders, rootDir);
 
-      console.log("\n🎨 [Image Converter] Запуск файлового watcher...");
-      console.log(`📁 Отслеживаемые папки: ${folders.join(", ")}`);
+      console.log("\n🎨 [Image Converter] Starting file watcher...");
+      console.log(`📁 Watching folders: ${folders.join(", ")}`);
       if (exclude.length > 0) {
-        console.log(`🚫 Исключенные папки: ${exclude.join(", ")}`);
+        console.log(`🚫 Excluded folders: ${exclude.join(", ")}`);
       }
       console.log(
-        `⚙️  AVIF конвертация: ${enableAvif ? "включена" : "отключена"}\n`
+        `⚙️  AVIF conversion: ${enableAvif ? "enabled" : "disabled"}\n`
       );
 
       // Инициализация chokidar watcher
@@ -68,16 +69,56 @@ export default function convertImages(config = {}) {
 
       // Обработка ошибок watcher
       watcher.on("error", (error) => {
-        console.error("❌ [Image Converter] Ошибка file watcher:", error);
+        console.error("❌ [Image Converter] File watcher error:", error);
       });
 
       // Закрытие watcher при остановке сервера
       server.httpServer?.on("close", () => {
         watcher.close();
-        console.log("\n🛑 [Image Converter] File watcher остановлен");
+        console.log("\n🛑 [Image Converter] File watcher stopped");
       });
     }
   };
+}
+
+/**
+ * Проверка существования файла (async)
+ * @param {string} path - Путь к файлу
+ * @returns {Promise<boolean>}
+ */
+async function fileExists(path) {
+  try {
+    await access(path, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Валидация папок против path traversal атак
+ * @param {string[]} folders - Список папок
+ * @param {string} rootDir - Корневая директория
+ * @returns {string[]} Валидированные абсолютные пути
+ */
+function validateFolders(folders, rootDir) {
+  return folders.map(folder => {
+    const absolutePath = resolve(rootDir, folder);
+    const relativePath = relative(rootDir, absolutePath);
+    
+    if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+      throw new Error(
+        `❌ Security: folder "${folder}" is outside project root\n` +
+        `   Project root: ${rootDir}\n` +
+        `   Attempted path: ${absolutePath}\n\n` +
+        `   Valid examples: 'src/img', 'public/img', './assets'\n` +
+        `   Invalid examples: '../other-project', '/etc/passwd'\n\n` +
+        `   💡 Tip: All paths must be inside your project directory.`
+      );
+    }
+    
+    return normalizePath(absolutePath);
+  });
 }
 
 /**
@@ -101,12 +142,12 @@ async function handleFileAdd(filePath, options) {
     }
 
     // Проверка 3: Не является сгенерированным файлом
-    if (isGeneratedFile(filePath)) {
+    if (await isGeneratedFile(filePath)) {
       return;
     }
 
     console.log(
-      `\n📸 [Image Converter] Обнаружен новый файл: ${getRelativePath(filePath, rootDir)}`
+      `\n📸 [Image Converter] New file detected: ${getRelativePath(filePath, rootDir)}`
     );
 
     // Определяем какие конвертации нужны
@@ -141,14 +182,14 @@ async function handleFileAdd(filePath, options) {
     const failed = results.filter((r) => r.status === "rejected").length;
 
     if (successful > 0) {
-      console.log(`✅ Успешно сконвертировано: ${successful} формат(ов)`);
+      console.log(`✅ Successfully converted: ${successful} format(s)`);
     }
     if (failed > 0) {
-      console.log(`❌ Ошибок конвертации: ${failed}`);
+      console.log(`❌ Conversion errors: ${failed}`);
     }
   } catch (error) {
     console.error(
-      `❌ [Image Converter] Ошибка обработки файла ${filePath}:`,
+      `❌ [Image Converter] Error processing file ${filePath}:`,
       error.message
     );
   }
@@ -163,9 +204,9 @@ async function handleFileAdd(filePath, options) {
  */
 async function convertImage(sourcePath, targetPath, format) {
   // Пропускаем если файл уже существует
-  if (existsSync(targetPath)) {
+  if (await fileExists(targetPath)) {
     console.log(
-      `   ⏭️  ${format.toUpperCase()}: файл уже существует, пропускаем`
+      `   ⏭️  ${format.toUpperCase()}: already exists, skipping`
     );
     return;
   }
@@ -179,26 +220,14 @@ async function convertImage(sourcePath, targetPath, format) {
 
     const duration = Date.now() - startTime;
     console.log(
-      `   ✓ ${format.toUpperCase()}: сконвертировано за ${duration}ms`
+      `   ✓ ${format.toUpperCase()}: converted in ${duration}ms`
     );
   } catch (error) {
     console.error(
-      `   ✗ ${format.toUpperCase()}: ошибка конвертации - ${error.message}`
+      `   ✗ ${format.toUpperCase()}: conversion error - ${error.message}`
     );
     throw error;
   }
-}
-
-/**
- * Нормализация пути (унификация слэшей и удаление лишних)
- * @param {string} path - Путь для нормализации
- * @returns {string}
- */
-function normalizePath(path) {
-  return path
-    .replace(/\\/g, "/") // Windows → Unix слэши
-    .replace(/^\/+/, "") // Убираем ведущие слэши
-    .replace(/\/+$/, ""); // Убираем конечные слэши
 }
 
 /**
@@ -227,9 +256,9 @@ function isInExcludedFolder(filePath, exclude, rootDir) {
 /**
  * Проверка, является ли файл сгенерированным (webp/avif)
  * @param {string} filePath - Путь к файлу
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
-function isGeneratedFile(filePath) {
+async function isGeneratedFile(filePath) {
   const ext = extname(filePath).toLowerCase();
 
   // Проверяем ТОЛЬКО для webp/avif файлов
@@ -243,10 +272,14 @@ function isGeneratedFile(filePath) {
   const dirPath = dirname(filePath);
   const possibleOriginals = [".jpg", ".jpeg", ".png"];
 
-  return possibleOriginals.some((originalExt) => {
+  for (const originalExt of possibleOriginals) {
     const originalPath = resolve(dirPath, fileNameWithoutExt + originalExt);
-    return existsSync(originalPath);
-  });
+    if (await fileExists(originalPath)) {
+      return true;
+    }
+  }
+  
+  return false;
 }
 
 /**

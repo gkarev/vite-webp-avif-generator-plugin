@@ -21,6 +21,38 @@ export interface PluginConfig {
    * @default true
    */
   enableAvif?: boolean;
+
+  /**
+   * Настройки качества для WebP
+   * @default { quality: 80, lossless: false, effort: 4 }
+   */
+  webpOptions?: {
+    /** Качество изображения (0-100) @default 80 */
+    quality?: number;
+    /** Использовать lossless сжатие @default false */
+    lossless?: boolean;
+    /** Уровень компрессии (0-6) @default 4 */
+    effort?: number;
+  };
+
+  /**
+   * Настройки качества для AVIF
+   * @default { quality: 75, lossless: false, effort: 4 }
+   */
+  avifOptions?: {
+    /** Качество изображения (0-100) @default 75 */
+    quality?: number;
+    /** Использовать lossless сжатие @default false */
+    lossless?: boolean;
+    /** Уровень компрессии (0-9) @default 4 */
+    effort?: number;
+  };
+
+  /**
+   * Подробное логирование
+   * @default true
+   */
+  verbose?: boolean;
 }
 
 /**
@@ -37,13 +69,15 @@ export interface PluginConfig {
  *
  * @example
  * ```js
- * // С настройками
+ * // С настройками качества
  * convertImages({
  *   folders: ['src/img', 'public/img'],
  *   exclude: ['src/img/temp'],
- *   enableAvif: true
+ *   enableAvif: true,
+ *   webpOptions: { quality: 85, effort: 5 },
+ *   avifOptions: { quality: 80, effort: 6 },
+ *   verbose: true
  * })
  * ```
  */
 export default function convertImages(config?: PluginConfig): Plugin;
-
