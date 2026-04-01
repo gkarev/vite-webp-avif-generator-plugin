@@ -84,10 +84,22 @@ export default function convertImages(config = {}) {
         console.error("[Image Converter] File watcher error:", error);
       });
 
-      return () => {
-        watcher.close();
+      let watcherClosed = false;
+      const closeWatcher = async () => {
+        if (watcherClosed) {
+          return;
+        }
+
+        watcherClosed = true;
+        await watcher.close();
         console.log("\n[Image Converter] File watcher stopped");
       };
+
+      if (server.httpServer) {
+        server.httpServer.once("close", () => {
+          void closeWatcher();
+        });
+      }
     }
   };
 }

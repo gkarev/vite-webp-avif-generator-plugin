@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-04-02
+
+### Fixed
+- Kept the image watcher alive for the whole Vite dev server lifecycle by closing it on the HTTP server `close` event instead of using the `configureServer` return hook.
+
+### Verified
+- Confirmed dev-mode behavior with Vite 5 and Vite 8, including `exclude` handling on real image files.
+
 ## [2.2.0] - 2026-04-01
 
 ### Changed
