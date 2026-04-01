@@ -1,6 +1,6 @@
 {
   "name": "vite-webp-avif-generator-plugin",
-  "version": "1.2.2",
+  "version": "2.2.1",
   "description": "Vite plugin for automatic image conversion to WebP and AVIF formats in dev mode",
   "author": "Karev G.S.",
   "license": "MIT",
@@ -33,24 +33,27 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/gkarev/vite-webp-avif-generator-plugin"
+    "url": "git+https://github.com/gkarev/vite-webp-avif-generator-plugin.git"
   },
   "bugs": {
     "url": "https://github.com/gkarev/vite-webp-avif-generator-plugin/issues"
   },
   "homepage": "https://github.com/gkarev/vite-webp-avif-generator-plugin#readme",
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=20.19.0"
   },
   "peerDependencies": {
-    "vite": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0"
+    "vite": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0"
   },
   "dependencies": {
     "chokidar": "^3.5.3 || ^4.0.0",
     "sharp": "^0.32.0 || ^0.33.0 || ^0.34.0"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "vite": "^8.0.3"
+  },
   "scripts": {
+    "dev:playground": "vite --config playground/vite.config.js",
     "prepublishOnly": "echo 'Ready to publish!'"
   }
 }

@@ -1,18 +1,19 @@
-import { resolve, dirname, extname, basename, relative } from "path";
+import { resolve, dirname, extname, basename, relative, isAbsolute } from "path";
 import { existsSync } from "fs";
+import { normalizePath } from "vite";
 import sharp from "sharp";
 import chokidar from "chokidar";
 
 /**
  * @typedef {Object} PluginConfig
- * @property {string[]} [folders=['src/img', 'public/img']] - Папки для отслеживания
- * @property {string[]} [exclude=[]] - Папки для исключения
- * @property {boolean} [enableAvif=true] - Включить конвертацию в AVIF
+ * @property {string[]} [folders=['src/img', 'public/img']] - Folders to watch
+ * @property {string[]} [exclude=[]] - Folders to exclude
+ * @property {boolean} [enableAvif=true] - Enable AVIF conversion
  */
 
 /**
- * Vite plugin для автоматической конвертации изображений в WebP и AVIF в dev режиме
- * @param {PluginConfig} [config={}] - Конфигурация плагина
+ * Vite plugin for automatic WebP and AVIF generation in dev mode.
+ * @param {PluginConfig} [config={}] - Plugin configuration
  * @returns {import('vite').Plugin}
  */
 export default function convertImages(config = {}) {
@@ -22,98 +23,121 @@ export default function convertImages(config = {}) {
     enableAvif = true
   } = config;
 
-  // Поддерживаемые форматы
   const SUPPORTED_FORMATS = [".jpg", ".jpeg", ".png", ".webp"];
 
   let rootDir = process.cwd();
+  let publicDir = "";
 
   return {
     name: "vite-webp-avif-generator",
+    apply: "serve",
 
+    /**
+     * @param {import('vite').ResolvedConfig} resolvedConfig
+     */
     configResolved(resolvedConfig) {
       rootDir = resolvedConfig.root || process.cwd();
+      publicDir =
+        typeof resolvedConfig.publicDir === "string" ? resolvedConfig.publicDir : "";
     },
 
+    /**
+     * @param {import('vite').ViteDevServer} server
+     */
     configureServer(server) {
-      const watchPaths = folders.map((folder) => resolve(rootDir, folder));
-
-      console.log("\n🎨 [Image Converter] Запуск файлового watcher...");
-      console.log(`📁 Отслеживаемые папки: ${folders.join(", ")}`);
-      if (exclude.length > 0) {
-        console.log(`🚫 Исключенные папки: ${exclude.join(", ")}`);
-      }
-      console.log(
-        `⚙️  AVIF конвертация: ${enableAvif ? "включена" : "отключена"}\n`
+      const watchPaths = folders.map((folder) =>
+        resolveConfiguredPath(folder, rootDir, publicDir)
+      );
+      const resolvedExclude = exclude.map((folder) =>
+        resolveConfiguredPath(folder, rootDir, publicDir)
       );
 
-      // Инициализация chokidar watcher
+      console.log("\n[Image Converter] Starting file watcher...");
+      console.log(`[Image Converter] Watched folders: ${folders.join(", ")}`);
+      if (exclude.length > 0) {
+        console.log(`[Image Converter] Excluded folders: ${exclude.join(", ")}`);
+      }
+      console.log(
+        `[Image Converter] AVIF conversion: ${enableAvif ? "enabled" : "disabled"}\n`
+      );
+
       const watcher = chokidar.watch(watchPaths, {
         persistent: true,
-        ignoreInitial: true, // Не обрабатываем существующие файлы при старте
+        ignoreInitial: true,
         awaitWriteFinish: {
           stabilityThreshold: 300,
           pollInterval: 100
         }
       });
 
-      // Обработчик добавления файла
       watcher.on("add", async (filePath) => {
         await handleFileAdd(filePath, {
           rootDir,
-          exclude,
+          publicDir,
+          exclude: resolvedExclude,
           enableAvif,
           SUPPORTED_FORMATS
         });
       });
 
-      // Обработка ошибок watcher
       watcher.on("error", (error) => {
-        console.error("❌ [Image Converter] Ошибка file watcher:", error);
+        console.error("[Image Converter] File watcher error:", error);
       });
 
-      // Закрытие watcher при остановке сервера
-      server.httpServer?.on("close", () => {
-        watcher.close();
-        console.log("\n🛑 [Image Converter] File watcher остановлен");
-      });
+      let watcherClosed = false;
+      const closeWatcher = async () => {
+        if (watcherClosed) {
+          return;
+        }
+
+        watcherClosed = true;
+        await watcher.close();
+        console.log("\n[Image Converter] File watcher stopped");
+      };
+
+      if (server.httpServer) {
+        server.httpServer.once("close", () => {
+          void closeWatcher();
+        });
+      }
     }
   };
 }
 
 /**
- * Обработка добавления нового файла
- * @param {string} filePath - Путь к добавленному файлу
- * @param {Object} options - Опции обработки
+ * Handle a newly added file.
+ * @param {string} filePath - Added file path
+ * @param {Object} options - Handler options
+ * @param {string} options.rootDir - Resolved Vite root
+ * @param {string} options.publicDir - Resolved Vite publicDir
+ * @param {string[]} options.exclude - Absolute excluded folders
+ * @param {boolean} options.enableAvif - Enable AVIF generation
+ * @param {string[]} options.SUPPORTED_FORMATS - Supported source formats
  */
 async function handleFileAdd(filePath, options) {
-  const { rootDir, exclude, enableAvif, SUPPORTED_FORMATS } = options;
+  const { rootDir, publicDir, exclude, enableAvif, SUPPORTED_FORMATS } = options;
 
   try {
-    // Проверка 1: Поддерживаемый формат
     const ext = extname(filePath).toLowerCase();
     if (!SUPPORTED_FORMATS.includes(ext)) {
       return;
     }
 
-    // Проверка 2: Не в исключенных папках
-    if (isInExcludedFolder(filePath, exclude, rootDir)) {
+    if (isInExcludedFolder(filePath, exclude)) {
       return;
     }
 
-    // Проверка 3: Не является сгенерированным файлом
     if (isGeneratedFile(filePath)) {
       return;
     }
 
     console.log(
-      `\n📸 [Image Converter] Обнаружен новый файл: ${getRelativePath(filePath, rootDir)}`
+      `\n[Image Converter] New file detected: ${getDisplayPath(filePath, rootDir, publicDir)}`
     );
 
-    // Определяем какие конвертации нужны
     const conversions = [];
     const isWebP = ext === ".webp";
 
-    // WebP: конвертируем только если исходник НЕ webp
     if (!isWebP) {
       conversions.push({
         format: "webp",
@@ -121,7 +145,6 @@ async function handleFileAdd(filePath, options) {
       });
     }
 
-    // AVIF: конвертируем всегда (если enableAvif=true)
     if (enableAvif) {
       conversions.push({
         format: "avif",
@@ -129,116 +152,140 @@ async function handleFileAdd(filePath, options) {
       });
     }
 
-    // Параллельная конвертация
     const results = await Promise.allSettled(
       conversions.map(({ format, targetPath }) =>
         convertImage(filePath, targetPath, format)
       )
     );
 
-    // Подсчет результатов
-    const successful = results.filter((r) => r.status === "fulfilled").length;
-    const failed = results.filter((r) => r.status === "rejected").length;
+    const successful = results.filter((result) => result.status === "fulfilled").length;
+    const failed = results.filter((result) => result.status === "rejected").length;
 
     if (successful > 0) {
-      console.log(`✅ Успешно сконвертировано: ${successful} формат(ов)`);
+      console.log(`[Image Converter] Successfully converted: ${successful} format(s)`);
     }
     if (failed > 0) {
-      console.log(`❌ Ошибок конвертации: ${failed}`);
+      console.log(`[Image Converter] Conversion errors: ${failed}`);
     }
   } catch (error) {
     console.error(
-      `❌ [Image Converter] Ошибка обработки файла ${filePath}:`,
+      `[Image Converter] Error while processing ${filePath}:`,
       error.message
     );
   }
 }
 
 /**
- * Конвертация изображения в указанный формат
- * @param {string} sourcePath - Путь к исходному файлу
- * @param {string} targetPath - Путь к целевому файлу
- * @param {string} format - Целевой формат (webp/avif)
+ * Convert an image to the requested format.
+ * @param {string} sourcePath - Source image path
+ * @param {string} targetPath - Target image path
+ * @param {string} format - Target format (webp/avif)
  * @returns {Promise<void>}
  */
 async function convertImage(sourcePath, targetPath, format) {
-  // Пропускаем если файл уже существует
   if (existsSync(targetPath)) {
-    console.log(
-      `   ⏭️  ${format.toUpperCase()}: файл уже существует, пропускаем`
-    );
+    console.log(`   ${format.toUpperCase()}: target already exists, skipping`);
     return;
   }
 
   const startTime = Date.now();
 
   try {
-    await sharp(sourcePath)
-      [format]() // Используем стандартные настройки sharp
-      .toFile(targetPath);
+    await sharp(sourcePath)[format]().toFile(targetPath);
 
     const duration = Date.now() - startTime;
-    console.log(
-      `   ✓ ${format.toUpperCase()}: сконвертировано за ${duration}ms`
-    );
+    console.log(`   ${format.toUpperCase()}: converted in ${duration}ms`);
   } catch (error) {
-    console.error(
-      `   ✗ ${format.toUpperCase()}: ошибка конвертации - ${error.message}`
-    );
+    console.error(`   ${format.toUpperCase()}: conversion failed - ${error.message}`);
     throw error;
   }
 }
 
 /**
- * Нормализация пути (унификация слэшей и удаление лишних)
- * @param {string} path - Путь для нормализации
+ * Resolve a configured folder against Vite root or publicDir.
+ * This keeps `public/...` working when frameworks set `root` to `srcDir`.
+ * @param {string} configuredPath - Path from plugin config
+ * @param {string} rootDir - Resolved Vite root
+ * @param {string} publicDir - Resolved Vite publicDir
  * @returns {string}
  */
-function normalizePath(path) {
-  return path
-    .replace(/\\/g, "/") // Windows → Unix слэши
-    .replace(/^\/+/, "") // Убираем ведущие слэши
-    .replace(/\/+$/, ""); // Убираем конечные слэши
+function resolveConfiguredPath(configuredPath, rootDir, publicDir) {
+  if (isAbsolute(configuredPath)) {
+    return configuredPath;
+  }
+
+  const normalizedConfiguredPath = trimSlashes(normalizePath(configuredPath));
+
+  if (!normalizedConfiguredPath) {
+    return rootDir;
+  }
+
+  if (publicDir) {
+    const publicDirName = basename(trimSlashes(normalizePath(publicDir)));
+
+    if (
+      normalizedConfiguredPath === publicDirName ||
+      normalizedConfiguredPath.startsWith(`${publicDirName}/`)
+    ) {
+      return resolve(dirname(publicDir), configuredPath);
+    }
+  }
+
+  return resolve(rootDir, configuredPath);
 }
 
 /**
- * Проверка, находится ли файл в исключенной папке
- * @param {string} filePath - Путь к файлу
- * @param {string[]} exclude - Список исключенных папок
- * @param {string} rootDir - Корневая директория
+ * Normalize a path for safe folder comparisons across platforms.
+ * @param {string} path - Path to normalize
+ * @returns {string}
+ */
+function normalizeComparisonPath(path) {
+  const normalizedPath = normalizePath(path).replace(/\/+$/, "");
+  return process.platform === "win32" ? normalizedPath.toLowerCase() : normalizedPath;
+}
+
+/**
+ * Trim leading and trailing slashes.
+ * @param {string} value - Raw value
+ * @returns {string}
+ */
+function trimSlashes(value) {
+  return value.replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+/**
+ * Check whether a file is inside an excluded folder.
+ * @param {string} filePath - File path
+ * @param {string[]} exclude - Absolute excluded folders
  * @returns {boolean}
  */
-function isInExcludedFolder(filePath, exclude, rootDir) {
+function isInExcludedFolder(filePath, exclude) {
   if (exclude.length === 0) return false;
 
-  const relativePath = normalizePath(getRelativePath(filePath, rootDir));
+  const normalizedFilePath = normalizeComparisonPath(filePath);
 
   return exclude.some((excludePath) => {
-    const normalizedExclude = normalizePath(excludePath);
+    const normalizedExclude = normalizeComparisonPath(excludePath);
 
-    // Проверяем точное совпадение папки или вложенность
     return (
-      relativePath === normalizedExclude ||
-      relativePath.startsWith(normalizedExclude + "/")
+      normalizedFilePath === normalizedExclude ||
+      normalizedFilePath.startsWith(`${normalizedExclude}/`)
     );
   });
 }
 
 /**
- * Проверка, является ли файл сгенерированным (webp/avif)
- * @param {string} filePath - Путь к файлу
+ * Detect generated WebP/AVIF files to avoid loops.
+ * @param {string} filePath - File path
  * @returns {boolean}
  */
 function isGeneratedFile(filePath) {
   const ext = extname(filePath).toLowerCase();
 
-  // Проверяем ТОЛЬКО для webp/avif файлов
-  // JPG/PNG/другие форматы всегда считаются оригиналами
   if (![".avif", ".webp"].includes(ext)) {
     return false;
   }
 
-  // Для webp/avif проверяем существование оригинала
   const fileNameWithoutExt = basename(filePath, ext);
   const dirPath = dirname(filePath);
   const possibleOriginals = [".jpg", ".jpeg", ".png"];
@@ -250,9 +297,9 @@ function isGeneratedFile(filePath) {
 }
 
 /**
- * Получить путь к целевому файлу
- * @param {string} sourcePath - Путь к исходному файлу
- * @param {string} format - Целевой формат
+ * Build a target path for the requested output format.
+ * @param {string} sourcePath - Source image path
+ * @param {string} format - Target format
  * @returns {string}
  */
 function getTargetPath(sourcePath, format) {
@@ -263,11 +310,33 @@ function getTargetPath(sourcePath, format) {
 }
 
 /**
- * Получить относительный путь от корня
- * @param {string} filePath - Абсолютный путь к файлу
- * @param {string} rootDir - Корневая директория
+ * Return a readable path for logs.
+ * @param {string} filePath - Absolute file path
+ * @param {string} rootDir - Resolved Vite root
+ * @param {string} publicDir - Resolved Vite publicDir
  * @returns {string}
  */
-function getRelativePath(filePath, rootDir) {
-  return relative(rootDir, filePath);
+function getDisplayPath(filePath, rootDir, publicDir) {
+  const normalizedFilePath = normalizeComparisonPath(filePath);
+  const normalizedRootDir = normalizeComparisonPath(rootDir);
+
+  if (
+    normalizedFilePath === normalizedRootDir ||
+    normalizedFilePath.startsWith(`${normalizedRootDir}/`)
+  ) {
+    return normalizePath(relative(rootDir, filePath));
+  }
+
+  if (publicDir) {
+    const normalizedPublicDir = normalizeComparisonPath(publicDir);
+
+    if (
+      normalizedFilePath === normalizedPublicDir ||
+      normalizedFilePath.startsWith(`${normalizedPublicDir}/`)
+    ) {
+      return normalizePath(relative(dirname(publicDir), filePath));
+    }
+  }
+
+  return normalizePath(filePath);
 }
