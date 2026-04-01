@@ -1,177 +1,40 @@
 # Changelog
 
-Все значимые изменения в проекте будут документированы в этом файле.
+All notable changes to this project will be documented in this file.
 
-Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
-и этот проект придерживается [Semantic Versioning](https://semver.org/lang/ru/).
-
-## [1.0.0] - 2024-10-28
-
-### ✨ Добавлено
-
-- 🎉 Первый релиз плагина
-- 🖼️ Автоматическая конвертация изображений в WebP формат
-- 📸 Автоматическая конвертация изображений в AVIF формат
-- 👀 File watcher на основе Chokidar для отслеживания изменений
-- ⚙️ Настраиваемые папки для отслеживания
-- 🚫 Поддержка исключения папок из обработки
-- 🔄 Опция включения/отключения AVIF конвертации
-- ⚡ Параллельная обработка WebP и AVIF
-- 🎯 Умное определение сгенерированных файлов
-- 📝 Подробное логирование всех операций
-- ✅ Пропуск существующих сгенерированных файлов
-- 📚 Полная документация (README, EXAMPLES, TECHNICAL)
-- 🔷 TypeScript определения типов
-- 🛡️ Обработка ошибок на всех уровнях
-- 🌐 Cross-platform совместимость (Windows/Linux/macOS)
-
-### 🎨 Особенности
-
-- **Поддерживаемые входные форматы**: JPG, JPEG, PNG, WebP
-- **Поддерживаемые выходные форматы**: WebP, AVIF
-- **Режим работы**: Только dev режим (configureServer hook)
-- **Оптимизации**:
-  - Пропуск существующих файлов
-  - Параллельная конвертация
-  - Игнорирование начальных файлов при запуске
-  - Предотвращение бесконечных циклов
-
-### 🔧 Технические детали
-
-- Использует `sharp` для конвертации изображений
-- Использует `chokidar` для отслеживания файловой системы
-- Интеграция с Vite Plugin API
-- JSDoc типы для IDE поддержки
-- TypeScript определения для type-safety
-
-### 📖 Документация
-
-- `README.md` - Основная документация и быстрый старт
-- `EXAMPLES.md` - Примеры использования и интеграции
-- `TECHNICAL.md` - Техническая документация и архитектура
-- `CHANGELOG.md` - История изменений
-- `.d.ts` файл - TypeScript типы
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### 🚀 Планируемые возможности
+## [2.2.0] - 2026-04-01
 
-#### Высокий приоритет
+### Changed
+- Added Vite 8 peer dependency support.
+- Scoped the plugin to dev server mode with `apply: "serve"`.
+- Switched path normalization to Vite `normalizePath`.
+- Moved watcher cleanup to the official `configureServer` return cleanup.
+- Made path comparisons case-insensitive only on Windows.
+- Added support for `public/...` paths when `publicDir` lives outside Vite `root`.
+- Made `exclude` resolution follow the same rules as watched folders.
+- Improved compatibility for Nuxt setups that use `srcDir` while keeping assets in the project-level `public/` directory.
 
-- [ ] Настройка качества конвертации для каждого формата
-- [ ] Resize опции для автоматического изменения размера
-- [ ] Прогресс бар для больших файлов
-- [ ] Статистика конвертации (время, размер файлов, экономия)
+### Documentation
+- Updated README with explicit Nuxt support notes and `srcDir` usage guidance.
+- Refreshed compatibility notes for Vite 4-8 and modern Node runtimes.
 
-#### Средний приоритет
+## [1.0.0] - 2024-10-28
 
-- [ ] Кеширование обработанных файлов
-- [ ] Ограничение параллельных операций (p-limit)
-- [ ] Поддержка дополнительных форматов (GIF → WebP, SVG оптимизация)
-- [ ] Watch режим для изменения файлов (не только add/unlink)
-- [ ] Генерация source maps для отладки
-
-#### Низкий приоритет
-
-- [ ] CLI утилита для ручной конвертации
-- [ ] Интеграция с Vite HMR для перезагрузки изображений
-- [ ] Поддержка custom Sharp пайплайнов
-- [ ] Интеграция с CDN для оптимизации доставки
-- [ ] Dashboard для мониторинга операций
-
-### 💡 Идеи для обсуждения
-
-- Поддержка build режима (не только dev)
-- Интеграция с image CDN сервисами
-- Автоматическая генерация responsive images
-- Генерация HTML `<picture>` элементов
-- Оптимизация метаданных изображений
-
-## [1.2.0] - 2024-10-28
-
-### 🐛 Исправлено
-
-- **КРИТИЧНО**: Функция `isGeneratedFile()` теперь не блокирует легитимные JPG/PNG файлы
-- Улучшена функция `isInExcludedFolder()` - устранены ложные срабатывания
-- Заменён `replace()` на `path.relative()` в `getRelativePath()`
-
-### ✨ Добавлено
-
-- Функция `normalizePath()` для унификации путей
-- Улучшенная обработка крайних случаев с именами папок
-
-### 📈 Улучшено
-
-- Производительность `isGeneratedFile()`: ~50% быстрее для JPG/PNG
-- Надёжность обработки путей на всех платформах
-- Качество кода: 8/10 → 9/10
-
-### 📝 Документация
-
-- `CODE-AUDIT.md` - полный аудит кода
-- `AUDIT-REPORT.md` - анализ замечаний (10+ страниц)
-- `AUDIT-SUMMARY.md` - краткая сводка
-- `FIXES-APPLIED.md` - отчёт о применённых исправлениях
-
-### 📊 Статистика
-
-- Строк кода: 256 → 236 (-7.8%)
-- Критических проблем: 1 → 0 ✅
-- Production-ready: 85% → 95% ⬆️
-
-## [1.1.0] - 2024-10-28
-
-### 🔄 Изменено
-
-- Удален функционал автоматического удаления сгенерированных файлов
-- Упрощена архитектура: 309 → 220 строк (-29%)
-
-### 📝 Документация
-
-- `UPDATE-SUMMARY.md` - детали изменений
-
-## Версионирование
-
-- **MAJOR** версия - несовместимые изменения API
-- **MINOR** версия - новые возможности с обратной совместимостью
-- **PATCH** версия - исправления ошибок
-
-## Обратная связь
-
-Если у вас есть предложения по улучшению плагина:
-
-1. Откройте Issue с описанием возможности
-2. Создайте Pull Request с реализацией
-3. Участвуйте в обсуждениях существующих предложений
-
-## Лицензия
-
-MIT © 2024
-
----
-
-## Формат записей
-
-### ✨ Добавлено (Added)
-
-Новые возможности
-
-### 🔄 Изменено (Changed)
-
-Изменения в существующей функциональности
-
-### 🗑️ Удалено (Deprecated)
-
-Функциональность, которая скоро будет удалена
-
-### ❌ Убрано (Removed)
-
-Удаленная функциональность
-
-### 🐛 Исправлено (Fixed)
-
-Исправления ошибок
-
-### 🔒 Безопасность (Security)
-
-Изменения, связанные с безопасностью
+### Added
+- Initial release of the plugin.
+- Automatic image conversion to WebP.
+- Automatic image conversion to AVIF.
+- Chokidar-based file watcher for new files.
+- Configurable folders to watch.
+- Excluded folder support.
+- Optional AVIF generation.
+- Parallel WebP and AVIF processing.
+- Generated file detection to avoid conversion loops.
+- Detailed logging.
+- TypeScript declaration file.
+- Cross-platform path handling support.

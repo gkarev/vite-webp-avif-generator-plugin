@@ -1,177 +1,114 @@
 # Vite WebP & AVIF Generator Plugin
 
-Production-ready Vite plugin for automatic image conversion to WebP and AVIF formats in dev mode.
+Vite plugin for automatic image conversion to WebP and AVIF during dev server runtime.
 
-## 🎯 Features
+## Features
 
-- ✅ Automatic image conversion when added to tracked folders
-- ✅ Smart skipping of existing files for optimization
-- ✅ Parallel image processing
-- ✅ Detailed logging of all operations
-- ✅ Configurable folders for tracking and exclusions
-- ✅ Optional AVIF conversion
+- Converts newly added images in watched folders
+- Skips existing targets to avoid extra work
+- Avoids loops on generated `.webp` and `.avif` files
+- Runs WebP and AVIF conversions in parallel
+- Supports Vite `publicDir` when it lives outside Vite `root`
+- Supports Nuxt setups with `srcDir` and project-level `public/`
+- Works in dev only via `apply: 'serve'`
 
-## 📦 Installation
+## Installation
 
 ```bash
-npm install -D vite-webp-avif-generator sharp chokidar
+npm install -D vite-webp-avif-generator-plugin sharp chokidar
 ```
 
-**Requirements:**
+## Basic Usage
 
-- Node.js >= 16
-- Vite >= 4.0.0
-
-## 🚀 Usage
-
-### Basic Configuration
-
-```javascript
+```js
 // vite.config.js
-import { defineConfig } from "vite";
-import convertImages from "vite-webp-avif-generator-plugin";
+import { defineConfig } from 'vite'
+import convertImages from 'vite-webp-avif-generator-plugin'
 
 export default defineConfig({
-  plugins: [
-    convertImages() // Default settings
-  ]
-});
+  plugins: [convertImages()],
+})
 ```
 
-### Advanced Configuration
+## Nuxt Support
 
-```javascript
+The plugin supports Nuxt projects where Vite `root` is moved by `srcDir`, while static assets still live in the project-level `public/` directory.
+
+That means you can keep paths like `public/img` in plugin options without overriding Vite `root` in development.
+
+Example:
+
+```ts
 convertImages({
-  folders: ["src/img", "public/img"], // Folders to watch
-  exclude: ["src/img/ignore"], // Folders to exclude
-  enableAvif: true // Enable AVIF conversion
-});
+  folders: ['src/assets/img', 'public/img'],
+  exclude: ['public/img/generated'],
+})
 ```
 
-## ⚙️ Configuration
+This is especially useful for setups like:
 
-| Parameter    | Type       | Default                     | Description            |
-| ------------ | ---------- | --------------------------- | ---------------------- |
-| `folders`    | `string[]` | `['src/img', 'public/img']` | Folders to watch       |
-| `exclude`    | `string[]` | `[]`                        | Folders to exclude     |
-| `enableAvif` | `boolean`  | `true`                      | Enable AVIF conversion |
+```ts
+export default defineNuxtConfig({
+  srcDir: './src',
+})
+```
 
-## 📸 Supported Formats
+## Options
 
-### Input Formats
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `folders` | `string[]` | `['src/img', 'public/img']` | Folders to watch |
+| `exclude` | `string[]` | `[]` | Folders to exclude |
+| `enableAvif` | `boolean` | `true` | Enable AVIF conversion |
 
-- `.jpg` / `.jpeg`
+## Path Resolution
+
+- Absolute paths are used as-is.
+- Relative paths are resolved from Vite `root`.
+- Paths that start with the configured public directory name, for example `public/img`, are resolved from the parent of Vite `publicDir`.
+
+This keeps the plugin compatible with standard Vite apps and with frameworks such as Nuxt that can shift the effective Vite root.
+
+## Supported Formats
+
+Input:
+- `.jpg`
+- `.jpeg`
 - `.png`
 - `.webp`
 
-### Output Formats
+Output:
+- `.webp` when source is not already WebP
+- `.avif` when `enableAvif` is `true`
 
-- **WebP**: Generated only if source is NOT webp
-- **AVIF**: Generated always (if `enableAvif: true`)
+## Behavior
 
-## 🔄 How It Works
+On each new file:
+1. Check supported extension
+2. Check excluded folders
+3. Skip generated `.webp` and `.avif` files
+4. Build conversion tasks
+5. Run conversions with `Promise.allSettled`
+6. Log success and error counts
 
-### On File Addition
+Existing files are ignored on startup because the watcher uses `ignoreInitial: true`.
 
-1. File format is checked (must be jpg/jpeg/png/webp)
-2. File location is verified (in watched folder, not excluded)
-3. Generated files are skipped
-4. Convert to WebP (if source is not webp)
-5. Convert to AVIF (if `enableAvif: true`)
-6. Skip conversion if target file already exists
+## Compatibility
 
-## 📁 File Structure Examples
+- Vite `4.x` to `8.x`
+- Nuxt projects powered by Vite, including `srcDir` setups
+- Chokidar `3.5.3+` and `4.x`
+- Sharp `0.32+`, `0.33+`, `0.34+`
 
-### Source File: `src/img/photo.jpg`
+Node runtime depends on the Vite major used in the host project.
 
-```
-src/img/
-  ├── photo.jpg       # Original
-  ├── photo.webp      # Auto-generated
-  └── photo.avif      # Auto-generated
-```
+For the currently declared package support:
+- Vite `7.x` to `8.x`: Node `20.19+`
 
-### Source File: `src/img/image.webp`
+If you plan to use older Vite majors, align the project runtime with that Vite version's official Node requirements.
 
-```
-src/img/
-  ├── image.webp      # Original
-  └── image.avif      # Auto-generated (WebP skipped)
-```
+## Notes
 
-## 🎨 Logging Examples
-
-### Successful Conversion
-
-```
-📸 [Image Converter] New file detected: src/img/photo.jpg
-   ✓ WEBP: converted in 145ms
-   ✓ AVIF: converted in 312ms
-✅ Successfully converted: 2 format(s)
-```
-
-### Skipping Existing File
-
-```
-📸 [Image Converter] New file detected: src/img/photo.jpg
-   ⏭️  WEBP: file already exists, skipping
-   ⏭️  AVIF: file already exists, skipping
-```
-
-## 🔧 Technical Details
-
-### Architecture
-
-The plugin uses a clean modular architecture:
-
-- **Main function**: `convertImages()` - plugin export
-- **Event handlers**:
-  - `handleFileAdd()` - handles file additions
-- **Conversion utilities**:
-  - `convertImage()` - converts to specified format
-- **Helper functions**:
-  - `isInExcludedFolder()` - checks exclusions
-  - `isGeneratedFile()` - checks if file is generated
-  - `getTargetPath()` - gets target file path
-  - `getRelativePath()` - gets relative path
-
-### Optimizations
-
-1. **Skip existing files**: Already converted files are skipped
-2. **Parallel processing**: WebP and AVIF are converted simultaneously
-3. **Smart generated file detection**: Prevents infinite conversion loops
-4. **Ignore initial files**: Existing files are not processed on startup
-
-### Error Handling
-
-- All operations are wrapped in try-catch blocks
-- Errors are logged via `console.error` with detailed description
-- One file error doesn't stop processing of other files
-- Promise.allSettled used for parallel operations
-
-## 💡 Best Practices
-
-1. **Use high-quality originals**: Plugin creates optimized versions
-2. **Add to .gitignore**: Generated files can be ignored
-3. **Use with ViteImageOptimizer**: For additional production optimization
-4. **Configure exclude**: For temporary file folders
-
-## 🛠️ Compatibility
-
-- **Vite**: 4.x, 5.x, 6.x, 7.x
-- **Node.js**: 16+
-- **Sharp**: 0.32+
-- **Chokidar**: 3.x, 4.x
-
-## 📝 License
-
-MIT
-
-## 🤝 Contributing
-
-This plugin is developed as a production-ready solution with emphasis on:
-
-- Performance
-- Reliability
-- Ease of use
-- Code quality
+- The plugin is intentionally dev-only.
+- The main conversion flow is file-system based and does not transform Vite modules.
+- If you change runtime behavior, update the runtime file, typings, and README together.
