@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- One-time idempotent initial conversion pass for images already present in watched folders on dev server start, controlled by the new `enableInitialPass` option (default `true`).
+- Recursive, symlink-safe file listing for the initial pass, with an internal concurrency limit for conversions.
+
+### Changed
+- Converted images are now written atomically (temp file + rename), preventing partial target files if the process is interrupted mid-write. Applies to both live and initial-pass conversions.
+- The initial conversion pass now waits for the file watcher's `ready` event before starting, narrowing the window in which files added right after server start could be missed by both the live watcher and the initial pass.
+
 ## [2.2.1] - 2026-04-02
 
 ### Fixed

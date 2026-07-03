@@ -1,22 +1,5 @@
 # Документация для разработки (не нужна в npm пакете)
-CODE-AUDIT.md
-AUDIT-REPORT.md
-AUDIT-SUMMARY.md
-FIXES-APPLIED.md
-FINAL-SUMMARY.md
-UPDATE-SUMMARY.md
-INDEX.md
-QUICKSTART.md
-EXAMPLES.md
-TECHNICAL.md
-.usage-summary.md
-
-# Руководства по публикации (не нужны пользователям)
-PUBLISHING-GUIDE.md
-PUBLISH-CHECKLIST.md
-PRE-PUBLISH-TEST.md
-READY-TO-PUBLISH.md
-NPM-README.md
+AGENTS.md
 
 # Файлы для разработки
 .git

@@ -1,14 +1,20 @@
 import { resolve, dirname, extname, basename, relative, isAbsolute } from "path";
 import { existsSync } from "fs";
+import { readdir, rename, rm } from "fs/promises";
+import { cpus } from "os";
+import { randomBytes } from "crypto";
 import { normalizePath } from "vite";
 import sharp from "sharp";
 import chokidar from "chokidar";
+
+const MIN_BULK_CONCURRENCY = 4;
 
 /**
  * @typedef {Object} PluginConfig
  * @property {string[]} [folders=['src/img', 'public/img']] - Folders to watch
  * @property {string[]} [exclude=[]] - Folders to exclude
  * @property {boolean} [enableAvif=true] - Enable AVIF conversion
+ * @property {boolean} [enableInitialPass=true] - Run a one-time conversion pass for existing files on server start
  */
 
 /**
@@ -20,7 +26,8 @@ export default function convertImages(config = {}) {
   const {
     folders = ["src/img", "public/img"],
     exclude = [],
-    enableAvif = true
+    enableAvif = true,
+    enableInitialPass = true
   } = config;
 
   const SUPPORTED_FORMATS = [".jpg", ".jpeg", ".png", ".webp"];
@@ -84,6 +91,18 @@ export default function convertImages(config = {}) {
         console.error("[Image Converter] File watcher error:", error);
       });
 
+      if (enableInitialPass) {
+        watcher.once("ready", () => {
+          void runInitialPass(watchPaths, {
+            rootDir,
+            publicDir,
+            exclude: resolvedExclude,
+            enableAvif,
+            SUPPORTED_FORMATS
+          });
+        });
+      }
+
       let watcherClosed = false;
       const closeWatcher = async () => {
         if (watcherClosed) {
@@ -113,22 +132,25 @@ export default function convertImages(config = {}) {
  * @param {string[]} options.exclude - Absolute excluded folders
  * @param {boolean} options.enableAvif - Enable AVIF generation
  * @param {string[]} options.SUPPORTED_FORMATS - Supported source formats
+ * @param {boolean} [options.isBulk=false] - Suppress per-file "already exists" logs during the initial pass
+ * @returns {Promise<{converted: number, skipped: number, failed: number}>}
  */
 async function handleFileAdd(filePath, options) {
-  const { rootDir, publicDir, exclude, enableAvif, SUPPORTED_FORMATS } = options;
+  const { rootDir, publicDir, exclude, enableAvif, SUPPORTED_FORMATS, isBulk = false } = options;
+  const tally = { converted: 0, skipped: 0, failed: 0 };
 
   try {
     const ext = extname(filePath).toLowerCase();
     if (!SUPPORTED_FORMATS.includes(ext)) {
-      return;
+      return tally;
     }
 
     if (isInExcludedFolder(filePath, exclude)) {
-      return;
+      return tally;
     }
 
     if (isGeneratedFile(filePath)) {
-      return;
+      return tally;
     }
 
     console.log(
@@ -154,12 +176,24 @@ async function handleFileAdd(filePath, options) {
 
     const results = await Promise.allSettled(
       conversions.map(({ format, targetPath }) =>
-        convertImage(filePath, targetPath, format)
+        convertImage(filePath, targetPath, format, { quiet: isBulk })
       )
     );
 
     const successful = results.filter((result) => result.status === "fulfilled").length;
     const failed = results.filter((result) => result.status === "rejected").length;
+
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        if (result.value === "converted") {
+          tally.converted += 1;
+        } else {
+          tally.skipped += 1;
+        }
+      } else {
+        tally.failed += 1;
+      }
+    }
 
     if (successful > 0) {
       console.log(`[Image Converter] Successfully converted: ${successful} format(s)`);
@@ -168,34 +202,45 @@ async function handleFileAdd(filePath, options) {
       console.log(`[Image Converter] Conversion errors: ${failed}`);
     }
   } catch (error) {
+    tally.failed += 1;
     console.error(
       `[Image Converter] Error while processing ${filePath}:`,
       error.message
     );
   }
+
+  return tally;
 }
 
 /**
- * Convert an image to the requested format.
+ * Convert an image to the requested format using an atomic write (temp file + rename).
  * @param {string} sourcePath - Source image path
  * @param {string} targetPath - Target image path
  * @param {string} format - Target format (webp/avif)
- * @returns {Promise<void>}
+ * @param {Object} [options={}] - Conversion options
+ * @param {boolean} [options.quiet=false] - Suppress the "target already exists" log line
+ * @returns {Promise<"converted"|"skipped">}
  */
-async function convertImage(sourcePath, targetPath, format) {
+async function convertImage(sourcePath, targetPath, format, { quiet = false } = {}) {
   if (existsSync(targetPath)) {
-    console.log(`   ${format.toUpperCase()}: target already exists, skipping`);
-    return;
+    if (!quiet) {
+      console.log(`   ${format.toUpperCase()}: target already exists, skipping`);
+    }
+    return "skipped";
   }
 
+  const tempPath = `${targetPath}.${randomBytes(4).toString("hex")}.tmp`;
   const startTime = Date.now();
 
   try {
-    await sharp(sourcePath)[format]().toFile(targetPath);
+    await sharp(sourcePath)[format]().toFile(tempPath);
+    await rename(tempPath, targetPath);
 
     const duration = Date.now() - startTime;
     console.log(`   ${format.toUpperCase()}: converted in ${duration}ms`);
+    return "converted";
   } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => {});
     console.error(`   ${format.toUpperCase()}: conversion failed - ${error.message}`);
     throw error;
   }
@@ -339,4 +384,81 @@ function getDisplayPath(filePath, rootDir, publicDir) {
   }
 
   return normalizePath(filePath);
+}
+
+/**
+ * Recursively list files in a directory without following symlinks.
+ * @param {string} dirPath - Directory to scan
+ * @returns {Promise<string[]>}
+ */
+async function listFilesRecursively(dirPath) {
+  const files = [];
+  let entries;
+
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true });
+  } catch (error) {
+    console.error(`[Image Converter] Failed to read directory ${dirPath}: ${error.message}`);
+    return files;
+  }
+
+  for (const entry of entries) {
+    const entryPath = resolve(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listFilesRecursively(entryPath)));
+    } else if (entry.isFile()) {
+      files.push(entryPath);
+    }
+  }
+
+  return files;
+}
+
+/**
+ * Run async work over a list of items with a maximum concurrency.
+ * @param {Array} items - Items to process
+ * @param {number} limit - Maximum concurrent workers
+ * @param {(item: *) => Promise<void>} worker - Async worker function
+ * @returns {Promise<void>}
+ */
+async function runWithConcurrencyLimit(items, limit, worker) {
+  let cursor = 0;
+
+  async function runNext() {
+    const index = cursor++;
+    if (index >= items.length) {
+      return;
+    }
+    await worker(items[index]);
+    await runNext();
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runNext));
+}
+
+/**
+ * Run a one-time idempotent conversion pass for files already present in watched folders.
+ * @param {string[]} watchPaths - Absolute watched folder paths
+ * @param {Object} handlerOptions - Options forwarded to handleFileAdd
+ * @returns {Promise<void>}
+ */
+async function runInitialPass(watchPaths, handlerOptions) {
+  const filesByFolder = await Promise.all(
+    watchPaths.map((folder) => (existsSync(folder) ? listFilesRecursively(folder) : []))
+  );
+  const files = filesByFolder.flat();
+
+  const summary = { processed: files.length, converted: 0, skipped: 0, failed: 0 };
+  const concurrency = Math.max(MIN_BULK_CONCURRENCY, cpus().length);
+
+  await runWithConcurrencyLimit(files, concurrency, async (filePath) => {
+    const result = await handleFileAdd(filePath, { ...handlerOptions, isBulk: true });
+    summary.converted += result.converted;
+    summary.skipped += result.skipped;
+    summary.failed += result.failed;
+  });
+
+  console.log(
+    `[Image Converter] Initial pass complete: processed ${summary.processed}, converted ${summary.converted}, skipped ${summary.skipped}, failed ${summary.failed}`
+  );
 }
