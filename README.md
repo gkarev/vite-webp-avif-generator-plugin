@@ -148,8 +148,8 @@ the server is running.
 
 - Vite `4.x` to `8.x`
 - Nuxt projects powered by Vite, including `srcDir` setups (set the `publicDir` option, see [Nuxt Support](#nuxt-support))
-- Chokidar `3.5.3+` and `4.x`
-- Sharp `0.32+`, `0.33+`, `0.34+`
+- Chokidar `3.5.3+`, `4.x`, and `5.x`
+- Sharp `0.32+`, `0.33+`, `0.34+`, and `0.35+`
 - Node `20.19+`, regardless of which supported Vite major you use
 
 The plugin declares `"engines": { "node": ">=20.19.0" }` unconditionally, so this Node

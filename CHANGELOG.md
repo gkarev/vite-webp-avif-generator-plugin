@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.3.0] - 2026-07-04
 
 ### Added
 - New `publicDir` option to explicitly override the public directory used to resolve `public/...`-style `folders`/`exclude` entries. This is required for reliable Nuxt support: Nuxt always sets Vite's own `publicDir` to `false` (on both the client and SSR dev servers, regardless of `srcDir`), so it could never be auto-detected there, and relative `public/...` paths could silently resolve to a non-existent folder under `srcDir` instead of the project's real `public/` directory.
@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Corrected the README's Nuxt Support guidance, which previously implied `public/...` paths resolve automatically in Nuxt; this was never reliable once `srcDir` differs from the project root, because Nuxt unconditionally disables Vite's own `publicDir` detection.
 - Console output for watched/excluded folders gained extra `configured -> resolved` lines; the original single-line summaries are unchanged, so existing log parsing continues to match, but any strict line-count assertions should account for the new lines.
+- Widened the `chokidar` peer range to include `^5.0.0` and the `sharp` range to include `^0.35.0`. Verified against the full `playground/scripts/run-tests.mjs` suite (42/42) with `chokidar@5.0.0` and `sharp@0.35.3` actually installed.
 
 This is a backward-compatible, additive change: the `publicDir` option defaults to unset, in which case path resolution and default behavior are unchanged from `2.2.3`.
 
