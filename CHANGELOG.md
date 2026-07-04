@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.3.1] - 2026-07-05
 
 ### Changed
 - Dev logging now goes through Vite's `logger` (`info`/`warn`/`warnOnce`/`error`) instead of raw `console.*`, so plugin output respects Vite's `logLevel` and `clearScreen` settings.
