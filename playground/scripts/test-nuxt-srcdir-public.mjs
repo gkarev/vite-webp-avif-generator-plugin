@@ -5,6 +5,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { setTimeout as delay } from "timers/promises";
 import convertImages from "../../vite-webp-avif-generator-plugin.js";
+import { createCaptureLogger } from "./capture-logger.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const playgroundRoot = resolve(__dirname, "..");
@@ -14,27 +15,6 @@ const results = [];
 function check(name, condition, detail = "") {
   results.push({ name, ok: !!condition, detail });
   console.log(`  ${condition ? "✓" : "✗"} ${name}${detail ? ` — ${detail}` : ""}`);
-}
-
-function captureLogs() {
-  const logs = [];
-  const originalLog = console.log;
-  const originalWarn = console.warn;
-  console.log = (...args) => {
-    logs.push(args.join(" "));
-    originalLog(...args);
-  };
-  console.warn = (...args) => {
-    logs.push(args.join(" "));
-    originalWarn(...args);
-  };
-  return {
-    text: () => logs.join("\n"),
-    restore: () => {
-      console.log = originalLog;
-      console.warn = originalWarn;
-    }
-  };
 }
 
 async function waitFor(predicate, { timeoutMs = 8000, intervalMs = 150 } = {}) {
@@ -71,18 +51,17 @@ async function caseA_bugReproduction() {
   await mkdir(appRoot, { recursive: true });
   await createFixture(fixture);
 
-  const capture = captureLogs();
+  const capture = createCaptureLogger();
   const server = await createServer({
     root: appRoot,
     publicDir: false,
     configFile: false,
-    logLevel: "silent",
+    customLogger: capture.logger,
     server: { middlewareMode: true },
     plugins: [convertImages({ folders: ["public/img"], enableInitialPass: true })]
   });
 
   const gotSummary = await waitFor(() => capture.text().includes("Initial pass complete"));
-  capture.restore();
 
   check("AC-A1: initial pass summary is printed", gotSummary);
   const match = capture.text().match(/Initial pass complete: processed (\d+)/);
@@ -117,12 +96,12 @@ async function caseB_fixVerification() {
   await mkdir(appRoot, { recursive: true });
   await createFixture(fixture);
 
-  const capture = captureLogs();
+  const capture = createCaptureLogger();
   const server = await createServer({
     root: appRoot,
     publicDir: false,
     configFile: false,
-    logLevel: "silent",
+    customLogger: capture.logger,
     server: { middlewareMode: true },
     plugins: [
       convertImages({
@@ -134,7 +113,6 @@ async function caseB_fixVerification() {
   });
 
   const gotSummary = await waitFor(() => capture.text().includes("Initial pass complete"));
-  capture.restore();
 
   check("AC-B1: initial pass summary is printed", gotSummary);
   const match = capture.text().match(/Initial pass complete: processed (\d+), converted (\d+)/);
@@ -165,18 +143,17 @@ async function caseC_backwardCompatibility() {
   await mkdir(caseDir, { recursive: true });
   await createFixture(fixture);
 
-  const capture = captureLogs();
+  const capture = createCaptureLogger();
   const server = await createServer({
     root: caseDir,
     publicDir: resolve(caseDir, "public"),
     configFile: false,
-    logLevel: "silent",
+    customLogger: capture.logger,
     server: { middlewareMode: true },
     plugins: [convertImages({ folders: ["public/img"], enableInitialPass: true })]
   });
 
   const gotSummary = await waitFor(() => capture.text().includes("Initial pass complete"));
-  capture.restore();
 
   check("AC-C1: initial pass summary is printed", gotSummary);
   const match = capture.text().match(/Initial pass complete: processed (\d+), converted (\d+)/);

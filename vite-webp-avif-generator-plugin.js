@@ -8,6 +8,7 @@ import sharp from "sharp";
 import chokidar from "chokidar";
 
 const MIN_BULK_CONCURRENCY = 4;
+const LOG_LABEL = "[vite-webp-avif-generator]";
 
 /**
  * @typedef {Object} PluginConfig
@@ -38,6 +39,8 @@ export default function convertImages(config = {}) {
 
   let rootDir = process.cwd();
   let publicDir = "";
+  /** @type {import('vite').Logger} */
+  let logger = console;
 
   return {
     name: "vite-webp-avif-generator",
@@ -49,6 +52,7 @@ export default function convertImages(config = {}) {
     configResolved(resolvedConfig) {
       rootDir = resolvedConfig.root || process.cwd();
       publicDir = resolveEffectivePublicDir(publicDirOption, resolvedConfig.publicDir, rootDir);
+      logger = resolvedConfig.logger;
     },
 
     /**
@@ -62,17 +66,15 @@ export default function convertImages(config = {}) {
         resolveConfiguredPath(folder, rootDir, publicDir)
       );
 
-      console.log("\n[Image Converter] Starting file watcher...");
-      console.log(`[Image Converter] Watched folders: ${folders.join(", ")}`);
-      console.log(describeResolvedFolders(folders, watchPaths));
+      logger.info(`\n${LOG_LABEL} Starting file watcher...`);
+      logger.info(`${LOG_LABEL} Watched folders: ${folders.join(", ")}`);
+      logger.info(describeResolvedFolders(folders, watchPaths));
       if (exclude.length > 0) {
-        console.log(`[Image Converter] Excluded folders: ${exclude.join(", ")}`);
-        console.log(describeResolvedFolders(exclude, resolvedExclude));
+        logger.info(`${LOG_LABEL} Excluded folders: ${exclude.join(", ")}`);
+        logger.info(describeResolvedFolders(exclude, resolvedExclude));
       }
-      console.log(
-        `[Image Converter] AVIF conversion: ${enableAvif ? "enabled" : "disabled"}\n`
-      );
-      warnAboutMissingFolders(folders, watchPaths);
+      logger.info(`${LOG_LABEL} AVIF conversion: ${enableAvif ? "enabled" : "disabled"}\n`);
+      warnAboutMissingFolders(folders, watchPaths, logger);
 
       const watcher = chokidar.watch(watchPaths, {
         persistent: true,
@@ -89,12 +91,13 @@ export default function convertImages(config = {}) {
           publicDir,
           exclude: resolvedExclude,
           enableAvif,
-          SUPPORTED_FORMATS
+          SUPPORTED_FORMATS,
+          logger
         });
       });
 
       watcher.on("error", (error) => {
-        console.error("[Image Converter] File watcher error:", error);
+        logger.error(`${LOG_LABEL} File watcher error: ${error?.message ?? error}`);
       });
 
       if (enableInitialPass) {
@@ -104,7 +107,8 @@ export default function convertImages(config = {}) {
             publicDir,
             exclude: resolvedExclude,
             enableAvif,
-            SUPPORTED_FORMATS
+            SUPPORTED_FORMATS,
+            logger
           });
         });
       }
@@ -123,9 +127,9 @@ export default function convertImages(config = {}) {
           watcherClosed = true;
           try {
             await watcher.close();
-            console.log("\n[Image Converter] File watcher stopped");
+            logger.info(`\n${LOG_LABEL} File watcher stopped`);
           } catch (error) {
-            console.error("[Image Converter] Failed to close file watcher:", error.message);
+            logger.error(`${LOG_LABEL} Failed to close file watcher: ${error.message}`);
           }
         }
         return originalClose(...args);
@@ -143,11 +147,13 @@ export default function convertImages(config = {}) {
  * @param {string[]} options.exclude - Absolute excluded folders
  * @param {boolean} options.enableAvif - Enable AVIF generation
  * @param {string[]} options.SUPPORTED_FORMATS - Supported source formats
+ * @param {import('vite').Logger} options.logger - Vite logger
  * @param {boolean} [options.isBulk=false] - Suppress per-file "already exists" logs during the initial pass
  * @returns {Promise<{converted: number, skipped: number, failed: number}>}
  */
 async function handleFileAdd(filePath, options) {
-  const { rootDir, publicDir, exclude, enableAvif, SUPPORTED_FORMATS, isBulk = false } = options;
+  const { rootDir, publicDir, exclude, enableAvif, SUPPORTED_FORMATS, logger, isBulk = false } =
+    options;
   const tally = { converted: 0, skipped: 0, failed: 0 };
 
   try {
@@ -164,8 +170,8 @@ async function handleFileAdd(filePath, options) {
       return tally;
     }
 
-    console.log(
-      `\n[Image Converter] New file detected: ${getDisplayPath(filePath, rootDir, publicDir)}`
+    logger.info(
+      `\n${LOG_LABEL} New file detected: ${getDisplayPath(filePath, rootDir, publicDir)}`
     );
 
     const conversions = [];
@@ -187,7 +193,7 @@ async function handleFileAdd(filePath, options) {
 
     const results = await Promise.allSettled(
       conversions.map(({ format, targetPath }) =>
-        convertImage(filePath, targetPath, format, { quiet: isBulk })
+        convertImage(filePath, targetPath, format, { quiet: isBulk, logger })
       )
     );
 
@@ -207,17 +213,14 @@ async function handleFileAdd(filePath, options) {
     }
 
     if (successful > 0) {
-      console.log(`[Image Converter] Successfully converted: ${successful} format(s)`);
+      logger.info(`${LOG_LABEL} Successfully converted: ${successful} format(s)`);
     }
     if (failed > 0) {
-      console.log(`[Image Converter] Conversion errors: ${failed}`);
+      logger.info(`${LOG_LABEL} Conversion errors: ${failed}`);
     }
   } catch (error) {
     tally.failed += 1;
-    console.error(
-      `[Image Converter] Error while processing ${filePath}:`,
-      error.message
-    );
+    logger.error(`${LOG_LABEL} Error while processing ${filePath}: ${error.message}`);
   }
 
   return tally;
@@ -230,12 +233,13 @@ async function handleFileAdd(filePath, options) {
  * @param {string} format - Target format (webp/avif)
  * @param {Object} [options={}] - Conversion options
  * @param {boolean} [options.quiet=false] - Suppress the "target already exists" log line
+ * @param {import('vite').Logger} [options.logger=console] - Vite logger
  * @returns {Promise<"converted"|"skipped">}
  */
-async function convertImage(sourcePath, targetPath, format, { quiet = false } = {}) {
+async function convertImage(sourcePath, targetPath, format, { quiet = false, logger = console } = {}) {
   if (existsSync(targetPath)) {
     if (!quiet) {
-      console.log(`   ${format.toUpperCase()}: target already exists, skipping`);
+      logger.info(`   ${format.toUpperCase()}: target already exists, skipping`);
     }
     return "skipped";
   }
@@ -248,11 +252,11 @@ async function convertImage(sourcePath, targetPath, format, { quiet = false } = 
     await rename(tempPath, targetPath);
 
     const duration = Date.now() - startTime;
-    console.log(`   ${format.toUpperCase()}: converted in ${duration}ms`);
+    logger.info(`   ${format.toUpperCase()}: converted in ${duration}ms`);
     return "converted";
   } catch (error) {
     await rm(tempPath, { force: true }).catch(() => {});
-    console.error(`   ${format.toUpperCase()}: conversion failed - ${error.message}`);
+    logger.error(`   ${format.toUpperCase()}: conversion failed - ${error.message}`);
     throw error;
   }
 }
@@ -274,15 +278,16 @@ function describeResolvedFolders(configuredFolders, resolvedFolders) {
  * possible fix without assuming any specific framework caused the mismatch.
  * @param {string[]} configuredFolders - Raw folder strings from plugin config
  * @param {string[]} resolvedFolders - Absolute paths resolved from `configuredFolders`
+ * @param {import('vite').Logger} logger - Vite logger
  */
-function warnAboutMissingFolders(configuredFolders, resolvedFolders) {
+function warnAboutMissingFolders(configuredFolders, resolvedFolders, logger) {
   resolvedFolders.forEach((resolvedFolder, index) => {
     if (existsSync(resolvedFolder)) {
       return;
     }
 
-    console.warn(
-      `[Image Converter] Warning: watched folder "${configuredFolders[index]}" resolved to ` +
+    logger.warnOnce(
+      `${LOG_LABEL} Warning: watched folder "${configuredFolders[index]}" resolved to ` +
         `${resolvedFolder}, but it does not exist. If this path should point elsewhere, ` +
         `set the "publicDir" option explicitly or use an absolute path in "folders".`
     );
@@ -450,23 +455,24 @@ function getDisplayPath(filePath, rootDir, publicDir) {
 /**
  * Recursively list files in a directory without following symlinks.
  * @param {string} dirPath - Directory to scan
+ * @param {import('vite').Logger} logger - Vite logger
  * @returns {Promise<string[]>}
  */
-async function listFilesRecursively(dirPath) {
+async function listFilesRecursively(dirPath, logger) {
   const files = [];
   let entries;
 
   try {
     entries = await readdir(dirPath, { withFileTypes: true });
   } catch (error) {
-    console.error(`[Image Converter] Failed to read directory ${dirPath}: ${error.message}`);
+    logger.error(`${LOG_LABEL} Failed to read directory ${dirPath}: ${error.message}`);
     return files;
   }
 
   for (const entry of entries) {
     const entryPath = resolve(dirPath, entry.name);
     if (entry.isDirectory()) {
-      files.push(...(await listFilesRecursively(entryPath)));
+      files.push(...(await listFilesRecursively(entryPath, logger)));
     } else if (entry.isFile()) {
       files.push(entryPath);
     }
@@ -504,8 +510,9 @@ async function runWithConcurrencyLimit(items, limit, worker) {
  * @returns {Promise<void>}
  */
 async function runInitialPass(watchPaths, handlerOptions) {
+  const { logger } = handlerOptions;
   const filesByFolder = await Promise.all(
-    watchPaths.map((folder) => (existsSync(folder) ? listFilesRecursively(folder) : []))
+    watchPaths.map((folder) => (existsSync(folder) ? listFilesRecursively(folder, logger) : []))
   );
   const files = filesByFolder.flat();
 
@@ -519,7 +526,7 @@ async function runInitialPass(watchPaths, handlerOptions) {
     summary.failed += result.failed;
   });
 
-  console.log(
-    `[Image Converter] Initial pass complete: processed ${summary.processed}, converted ${summary.converted}, skipped ${summary.skipped}, failed ${summary.failed}`
+  logger.info(
+    `${LOG_LABEL} Initial pass complete: processed ${summary.processed}, converted ${summary.converted}, skipped ${summary.skipped}, failed ${summary.failed}`
   );
 }

@@ -156,6 +156,14 @@ The plugin declares `"engines": { "node": ">=20.19.0" }` unconditionally, so thi
 requirement applies even if your project uses an older Vite major (`4.x`-`6.x`) that
 itself supports lower Node versions.
 
+## Logging
+
+Dev output goes through Vite's own logger, so it respects Vite's `logLevel` and
+`clearScreen` settings (for example, `logLevel: 'silent'` suppresses the plugin's logs
+while conversions still run). Every top-level message is prefixed with
+`[vite-webp-avif-generator]`; per-format lines (`WEBP`/`AVIF`) are indented and
+intentionally left unprefixed.
+
 ## Notes
 
 - The plugin is intentionally dev-only.

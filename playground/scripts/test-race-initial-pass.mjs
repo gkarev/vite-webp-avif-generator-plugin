@@ -7,6 +7,9 @@ import { setTimeout as delay } from "timers/promises";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(root, "..");
 const configPath = resolve(root, "vite.config.js");
+// Spawn the Vite binary directly for cross-platform behavior (Windows `npx` is a
+// `.cmd` shim that `spawn` cannot exec without a shell).
+const viteBinPath = resolve(repoRoot, "node_modules/vite/bin/vite.js");
 const BULK_COUNT = 80;
 const raceBase = "race-during-initial-pass";
 
@@ -20,10 +23,15 @@ async function exists(path) {
 }
 
 async function killPort5173() {
+  // Best-effort; `lsof` is absent on Windows, so no-op there rather than crash.
+  if (process.platform === "win32") {
+    return;
+  }
   try {
     const child = spawn("lsof", ["-ti:5173"]);
     const pids = await new Promise((res) => {
       let data = "";
+      child.on("error", () => res(""));
       child.stdout.on("data", (c) => (data += c));
       child.on("close", () => res(data.trim()));
     });
@@ -86,7 +94,7 @@ async function main() {
   const output = [];
   let raceFileDropped = false;
 
-  const child = spawn("npx", ["vite", "--config", configPath], {
+  const child = spawn(process.execPath, [viteBinPath, "--config", configPath], {
     cwd: repoRoot,
     stdio: ["ignore", "pipe", "pipe"]
   });

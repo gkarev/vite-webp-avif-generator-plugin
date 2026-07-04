@@ -4,6 +4,7 @@ import { existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import convertImages from "../../vite-webp-avif-generator-plugin.js";
+import { createCaptureLogger } from "./capture-logger.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const playgroundRoot = resolve(__dirname, "..");
@@ -19,59 +20,41 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function captureLogs() {
-  const logs = [];
-  const original = console.log;
-  console.log = (...args) => {
-    logs.push(args.join(" "));
-    original(...args);
-  };
-  return {
-    logs,
-    restore: () => {
-      console.log = original;
-    }
-  };
-}
-
-function countStoppedLogs(logs) {
-  return logs.filter((l) => l.includes("File watcher stopped")).length;
-}
+const STOPPED = "File watcher stopped";
 
 async function scenarioB_middlewareMode() {
   console.log("\n## Scenario B: middleware mode (Nuxt-like, httpServer === null)");
 
   await mkdir(scratchDir, { recursive: true });
 
+  const capture = createCaptureLogger();
   const server = await createServer({
     root: playgroundRoot,
     configFile: false,
-    logLevel: "silent",
+    customLogger: capture.logger,
     server: { middlewareMode: true },
     plugins: [convertImages({ folders: [".nuxt-scratch"] })]
   });
 
   check("AC-001 precondition: httpServer is null in middleware mode", server.httpServer === null);
 
-  const capture = captureLogs();
+  const before = capture.count(STOPPED);
   await server.close();
-  capture.restore();
-  const stoppedOnFirstClose = countStoppedLogs(capture.logs);
+  const stoppedOnFirstClose = capture.count(STOPPED) - before;
   check(
     "AC-001: watcher.close() invoked exactly once via wrapped server.close() in middleware mode",
     stoppedOnFirstClose === 1,
     `count=${stoppedOnFirstClose}`
   );
 
-  const capture2 = captureLogs();
+  const beforeSecond = capture.count(STOPPED);
   let threwOnSecondClose = false;
   try {
     await server.close();
   } catch {
     threwOnSecondClose = true;
   }
-  capture2.restore();
-  const stoppedOnSecondClose = countStoppedLogs(capture2.logs);
+  const stoppedOnSecondClose = capture.count(STOPPED) - beforeSecond;
   check(
     "AC-004: repeated close() does not re-invoke watcher.close() and does not throw",
     stoppedOnSecondClose === 0 && !threwOnSecondClose,
@@ -82,18 +65,18 @@ async function scenarioB_middlewareMode() {
 async function scenarioC_restart() {
   console.log("\n## Scenario C: dev server restart in the same process (no orphaned watchers)");
 
+  const capture = createCaptureLogger();
   const server = await createServer({
     root: playgroundRoot,
     configFile: false,
-    logLevel: "silent",
+    customLogger: capture.logger,
     server: { middlewareMode: true },
     plugins: [convertImages({ folders: [".nuxt-scratch"] })]
   });
 
-  const capture = captureLogs();
+  const beforeRestart = capture.count(STOPPED);
   await server.restart();
-  capture.restore();
-  const stoppedOnRestart = countStoppedLogs(capture.logs);
+  const stoppedOnRestart = capture.count(STOPPED) - beforeRestart;
   check(
     "AC-003: watcher.close() fires on restart, cleanup path is exercised",
     stoppedOnRestart === 1,
@@ -115,10 +98,9 @@ async function scenarioC_restart() {
     existsSync(resolve(scratchDir, "after-restart.avif"));
   check("A watcher is still active and converting after restart (no dead server)", converted);
 
-  const capture3 = captureLogs();
+  const beforeFinalClose = capture.count(STOPPED);
   await server.close();
-  capture3.restore();
-  const stoppedOnFinalClose = countStoppedLogs(capture3.logs);
+  const stoppedOnFinalClose = capture.count(STOPPED) - beforeFinalClose;
   check(
     "No orphaned watcher: final close stops exactly the post-restart watcher, none leaked",
     stoppedOnFinalClose === 1,

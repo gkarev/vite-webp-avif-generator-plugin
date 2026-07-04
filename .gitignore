@@ -35,3 +35,4 @@ tmp/
 *.md
 !README.md
 !CHANGELOG.md
+*.log

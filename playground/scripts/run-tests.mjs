@@ -101,10 +101,17 @@ async function stopChild(child) {
 }
 
 async function killPort5173() {
+  // Best-effort cleanup of a stale dev server on the default Vite port. Uses
+  // `lsof`, which is absent on Windows, so degrade to a no-op there instead of
+  // crashing the run on the unhandled child "error" event.
+  if (process.platform === "win32") {
+    return;
+  }
   try {
     const child = spawn("lsof", ["-ti:5173"]);
     const pids = await new Promise((res) => {
       let data = "";
+      child.on("error", () => res(""));
       child.stdout.on("data", (c) => (data += c));
       child.on("close", () => res(data.trim()));
     });
@@ -213,7 +220,7 @@ async function testSection1() {
   });
   const log = session.log();
 
-  if (log.includes("[Image Converter] Starting file watcher")) pass("1", "Watcher started");
+  if (log.includes("[vite-webp-avif-generator] Starting file watcher")) pass("1", "Watcher started");
   else fail("1", "Watcher started");
 
   if (log.includes("Excluded folders: src/img/excluded, public/img/excluded")) {
@@ -432,16 +439,19 @@ async function testSection9() {
   const beforeWebp = await exists(resolve(root, "src/img/initial-pass/fresh.webp"));
   const output = await new Promise((res, rej) => {
     const chunks = [];
-    const child = spawn("npx", ["vite", "build", "--config", defaultConfigPath], {
+    // Spawn the Vite binary directly (not via `npx`) so this works cross-platform;
+    // on Windows `spawn("npx", ...)` without a shell fails with ENOENT.
+    const child = spawn(process.execPath, [viteBinPath, "build", "--config", defaultConfigPath], {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"]
     });
+    child.on("error", rej);
     child.stdout.on("data", (c) => chunks.push(c.toString()));
     child.stderr.on("data", (c) => chunks.push(c.toString()));
     child.on("exit", (code) => (code === 0 ? res(chunks.join("")) : rej(new Error(chunks.join("")))));
   });
 
-  if (!output.includes("[Image Converter]")) pass("9", "No converter logs in build");
+  if (!output.includes("[vite-webp-avif-generator]")) pass("9", "No converter logs in build");
   else fail("9", "No converter logs in build");
 
   const afterWebp = await exists(resolve(root, "src/img/initial-pass/fresh.webp"));
@@ -495,8 +505,18 @@ async function testSection11() {
   );
 
   const { symlink } = await import("fs/promises");
-  await symlink("../initial-pass/fresh.png", symlinkFile);
-  await symlink("../../symlink-outside", symlinkDir);
+  try {
+    await symlink("../initial-pass/fresh.png", symlinkFile);
+    await symlink("../../symlink-outside", symlinkDir);
+  } catch (error) {
+    // Creating symlinks on Windows needs elevation/Developer Mode; skip cleanly there.
+    if (error.code === "EPERM" || error.code === "EACCES") {
+      console.log(`  - Skipped (no symlink privilege): ${error.code}`);
+      await rm(symlinkOutside, { recursive: true, force: true });
+      return;
+    }
+    throw error;
+  }
 
   const session = await runVite(defaultConfigPath, {
     until: (log) => log.includes("Initial pass complete")
@@ -549,6 +569,14 @@ async function testSection12() {
 
 async function testSection13() {
   console.log("\n## 13. Watcher stop");
+  // Vite only registers a graceful-shutdown listener for SIGTERM, which on Windows
+  // is not deliverable to a handler (the process is terminated unconditionally), so
+  // the cleanup path can't be exercised via a spawned signal there. The same guarantee
+  // is verified cross-platform in test-nuxt-watcher-cleanup.mjs via in-process close().
+  if (process.platform === "win32") {
+    console.log("  - Skipped on Windows (SIGTERM cleanup covered by test-nuxt-watcher-cleanup.mjs)");
+    return;
+  }
   const session = await runVite(defaultConfigPath, {
     until: (log) => log.includes("ready in")
   });
@@ -556,7 +584,7 @@ async function testSection13() {
   await session.stop();
   await delay(3000);
   const log = session.log();
-  if (log.includes("[Image Converter] File watcher stopped")) {
+  if (log.includes("[vite-webp-avif-generator] File watcher stopped")) {
     pass("13", "Watcher stopped on shutdown");
   } else fail("13", "Watcher stopped on shutdown");
 }

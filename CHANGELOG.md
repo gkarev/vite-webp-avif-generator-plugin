@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- Dev logging now goes through Vite's `logger` (`info`/`warn`/`warnOnce`/`error`) instead of raw `console.*`, so plugin output respects Vite's `logLevel` and `clearScreen` settings.
+- Unified the log prefix to `[vite-webp-avif-generator]` (matching the plugin `name`), replacing the previous `[Image Converter]` label. Update any log parsing that matched the old prefix.
+
 ## [2.3.0] - 2026-07-04
 
 ### Added
