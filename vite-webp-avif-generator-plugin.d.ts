@@ -31,6 +31,13 @@ export interface PluginConfig {
    * @default true
    */
   enableAvif?: boolean;
+
+  /**
+   * Run a one-time conversion pass for existing files on server start.
+   *
+   * @default true
+   */
+  enableInitialPass?: boolean;
 }
 
 /**
