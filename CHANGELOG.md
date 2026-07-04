@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Converted images are now written atomically (temp file + rename), preventing partial target files if the process is interrupted mid-write. Applies to both live and initial-pass conversions.
 - The initial conversion pass now waits for the file watcher's `ready` event before starting, narrowing the window in which files added right after server start could be missed by both the live watcher and the initial pass.
 
+### Fixed
+- Closed the file watcher by wrapping each dev server instance's own `close()` method instead of `server.httpServer.once("close", ...)`, fixing a leak in Vite middleware-mode setups (such as Nuxt) where `server.httpServer` is `null` and the previous cleanup never ran. This supersedes the `[2.2.1]` fix below, which only addressed the standard (non-middleware) case.
+- Fixed a watcher leak affecting real Nuxt projects: Nuxt runs two independent Vite dev servers (client build and server/SSR build) from the same `convertImages()` plugin instance passed via `nuxt.config.ts`. Cleanup state (the watcher and its idempotency flag) is now local to each `configureServer(server)` call instead of shared across the plugin instance, so closing one server's watcher can no longer overwrite or leak the other's — verified against real `nuxi dev` runs on Nuxt 3.21.8 and 4.4.8, including config-triggered restarts. This also removes a narrower, previously-documented edge case with Vite's own `server.restart()` reusing inline plugin instances.
+- Errors thrown by `watcher.close()` are now caught and logged instead of propagating, so a failed close no longer blocks the rest of the dev server shutdown sequence.
+
 ## [2.2.1] - 2026-04-02
 
 ### Fixed

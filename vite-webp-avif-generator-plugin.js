@@ -103,22 +103,27 @@ export default function convertImages(config = {}) {
         });
       }
 
+      // Close this watcher when *this specific* dev server instance shuts
+      // down, by wrapping its own `close()` rather than relying on
+      // `server.httpServer` (which is `null` in middleware mode, e.g. Nuxt)
+      // or a factory-scoped variable. Frameworks like Nuxt run a separate
+      // Vite server per environment (client/server) from the same plugin
+      // object, so state must stay local to each `server` instance to avoid
+      // one watcher's cleanup overwriting another's.
       let watcherClosed = false;
-      const closeWatcher = async () => {
-        if (watcherClosed) {
-          return;
+      const originalClose = server.close.bind(server);
+      server.close = async (...args) => {
+        if (!watcherClosed) {
+          watcherClosed = true;
+          try {
+            await watcher.close();
+            console.log("\n[Image Converter] File watcher stopped");
+          } catch (error) {
+            console.error("[Image Converter] Failed to close file watcher:", error.message);
+          }
         }
-
-        watcherClosed = true;
-        await watcher.close();
-        console.log("\n[Image Converter] File watcher stopped");
+        return originalClose(...args);
       };
-
-      if (server.httpServer) {
-        server.httpServer.once("close", () => {
-          void closeWatcher();
-        });
-      }
     }
   };
 }

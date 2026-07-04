@@ -17,8 +17,10 @@ Vite plugin for automatic image conversion to WebP and AVIF during dev server ru
 ## Installation
 
 ```bash
-npm install -D vite-webp-avif-generator-plugin sharp chokidar
+npm install -D vite-webp-avif-generator-plugin
 ```
+
+`sharp` and `chokidar` are installed automatically as regular dependencies.
 
 ## Basic Usage
 
@@ -54,6 +56,13 @@ export default defineNuxtConfig({
   srcDir: './src',
 })
 ```
+
+The file watcher is closed by wrapping the dev server's own `close()` method, so
+cleanup does not depend on `server.httpServer` (which is `null` in Nuxt's middleware
+mode). Nuxt actually runs two separate Vite dev servers from the same plugin instance
+(one for the client build, one for the server/SSR build); because cleanup is scoped to
+each server instance individually, both watchers are closed independently with no
+leaks, whether the dev server shuts down or restarts in the same process.
 
 ## Options
 
