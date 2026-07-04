@@ -15,6 +15,9 @@ const MIN_BULK_CONCURRENCY = 4;
  * @property {string[]} [exclude=[]] - Folders to exclude
  * @property {boolean} [enableAvif=true] - Enable AVIF conversion
  * @property {boolean} [enableInitialPass=true] - Run a one-time conversion pass for existing files on server start
+ * @property {string} [publicDir] - Explicit public directory used to resolve `public/...`-style
+ *   `folders`/`exclude` entries. Overrides Vite's own `publicDir` detection, which is required
+ *   for Nuxt (Vite's `publicDir` is always `false` there, regardless of `srcDir`).
  */
 
 /**
@@ -27,7 +30,8 @@ export default function convertImages(config = {}) {
     folders = ["src/img", "public/img"],
     exclude = [],
     enableAvif = true,
-    enableInitialPass = true
+    enableInitialPass = true,
+    publicDir: publicDirOption
   } = config;
 
   const SUPPORTED_FORMATS = [".jpg", ".jpeg", ".png", ".webp"];
@@ -44,8 +48,7 @@ export default function convertImages(config = {}) {
      */
     configResolved(resolvedConfig) {
       rootDir = resolvedConfig.root || process.cwd();
-      publicDir =
-        typeof resolvedConfig.publicDir === "string" ? resolvedConfig.publicDir : "";
+      publicDir = resolveEffectivePublicDir(publicDirOption, resolvedConfig.publicDir, rootDir);
     },
 
     /**
@@ -61,12 +64,15 @@ export default function convertImages(config = {}) {
 
       console.log("\n[Image Converter] Starting file watcher...");
       console.log(`[Image Converter] Watched folders: ${folders.join(", ")}`);
+      console.log(describeResolvedFolders(folders, watchPaths));
       if (exclude.length > 0) {
         console.log(`[Image Converter] Excluded folders: ${exclude.join(", ")}`);
+        console.log(describeResolvedFolders(exclude, resolvedExclude));
       }
       console.log(
         `[Image Converter] AVIF conversion: ${enableAvif ? "enabled" : "disabled"}\n`
       );
+      warnAboutMissingFolders(folders, watchPaths);
 
       const watcher = chokidar.watch(watchPaths, {
         persistent: true,
@@ -249,6 +255,56 @@ async function convertImage(sourcePath, targetPath, format, { quiet = false } = 
     console.error(`   ${format.toUpperCase()}: conversion failed - ${error.message}`);
     throw error;
   }
+}
+
+/**
+ * Build a "configured -> resolved" log block for a list of configured folders.
+ * @param {string[]} configuredFolders - Raw folder strings from plugin config
+ * @param {string[]} resolvedFolders - Absolute paths resolved from `configuredFolders`
+ * @returns {string}
+ */
+function describeResolvedFolders(configuredFolders, resolvedFolders) {
+  return configuredFolders
+    .map((configured, index) => `  ${configured} -> ${resolvedFolders[index]}`)
+    .join("\n");
+}
+
+/**
+ * Warn once per missing resolved watch folder, pointing at the `publicDir` option as a
+ * possible fix without assuming any specific framework caused the mismatch.
+ * @param {string[]} configuredFolders - Raw folder strings from plugin config
+ * @param {string[]} resolvedFolders - Absolute paths resolved from `configuredFolders`
+ */
+function warnAboutMissingFolders(configuredFolders, resolvedFolders) {
+  resolvedFolders.forEach((resolvedFolder, index) => {
+    if (existsSync(resolvedFolder)) {
+      return;
+    }
+
+    console.warn(
+      `[Image Converter] Warning: watched folder "${configuredFolders[index]}" resolved to ` +
+        `${resolvedFolder}, but it does not exist. If this path should point elsewhere, ` +
+        `set the "publicDir" option explicitly or use an absolute path in "folders".`
+    );
+  });
+}
+
+/**
+ * Determine the effective public directory used to resolve `public/...`-style paths.
+ * The explicit `publicDir` plugin option always wins over Vite's own detection, because
+ * frameworks like Nuxt force `resolvedConfig.publicDir` to `false` unconditionally, making
+ * Vite's value unusable there regardless of `srcDir`.
+ * @param {string|undefined} publicDirOption - Explicit `publicDir` plugin option
+ * @param {string|false|undefined} viteConfigPublicDir - Vite's own resolved `publicDir`
+ * @param {string} rootDir - Resolved Vite root
+ * @returns {string}
+ */
+function resolveEffectivePublicDir(publicDirOption, viteConfigPublicDir, rootDir) {
+  if (typeof publicDirOption === "string" && publicDirOption.length > 0) {
+    return isAbsolute(publicDirOption) ? publicDirOption : resolve(rootDir, publicDirOption);
+  }
+
+  return typeof viteConfigPublicDir === "string" ? viteConfigPublicDir : "";
 }
 
 /**

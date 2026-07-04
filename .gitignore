@@ -31,7 +31,6 @@ coverage/
 .cache/
 temp/
 tmp/
-playground/
 
 *.md
 !README.md

@@ -1,0 +1,11 @@
+{
+  "name": "nuxt3-watcher-cleanup-check",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxi dev"
+  },
+  "devDependencies": {
+    "nuxt": "3.21.8"
+  }
+}

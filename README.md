@@ -11,7 +11,7 @@ Vite plugin for automatic image conversion to WebP and AVIF during dev server ru
 - Runs WebP and AVIF conversions in parallel
 - Writes converted files atomically (temp file + rename)
 - Supports Vite `publicDir` when it lives outside Vite `root`
-- Supports Nuxt setups with `srcDir` and project-level `public/`
+- Optional `publicDir` override for frameworks (like Nuxt) where Vite's own `publicDir` can't be auto-detected
 - Works in dev only via `apply: 'serve'`
 
 ## Installation
@@ -36,16 +36,28 @@ export default defineConfig({
 
 ## Nuxt Support
 
-The plugin supports Nuxt projects where Vite `root` is moved by `srcDir`, while static assets still live in the project-level `public/` directory.
+Nuxt always sets Vite's own `publicDir` option to `false`, on both the client and
+server/SSR dev servers it creates, regardless of `srcDir`. This is enforced by Nuxt
+itself (`vite.publicDir` is deliberately not configurable — see the
+[Nuxt config reference](https://nuxt.com/docs/api/nuxt-config#publicdir)), so the
+plugin cannot auto-detect a real `publicDir` in Nuxt the way it can in a standard Vite
+project.
 
-That means you can keep paths like `public/img` in plugin options without overriding Vite `root` in development.
+As a result, relative `public/img`-style paths in `folders`/`exclude` are **not**
+reliable in Nuxt on their own — they resolve against Vite `root` (which Nuxt sets to
+`srcDir`), not against the project's actual `public/` directory. If `srcDir` differs
+from the project root, this silently resolves to a folder that doesn't exist, and the
+initial pass logs `processed 0`.
 
-Example:
+Use the `publicDir` option to point the plugin at the real public directory explicitly:
 
 ```ts
+import { resolve } from 'node:path'
+
 convertImages({
   folders: ['src/assets/img', 'public/img'],
   exclude: ['public/img/generated'],
+  publicDir: resolve(process.cwd(), 'public'),
 })
 ```
 
@@ -56,6 +68,11 @@ export default defineNuxtConfig({
   srcDir: './src',
 })
 ```
+
+If you see `processed 0` in the initial-pass summary, or a
+`Warning: watched folder "..." resolved to ..., but it does not exist` log line, check
+the resolved path logged at startup and set `publicDir` (or use an absolute path in
+`folders`) to fix it.
 
 The file watcher is closed by wrapping the dev server's own `close()` method, so
 cleanup does not depend on `server.httpServer` (which is `null` in Nuxt's middleware
@@ -72,14 +89,21 @@ leaks, whether the dev server shuts down or restarts in the same process.
 | `exclude` | `string[]` | `[]` | Folders to exclude |
 | `enableAvif` | `boolean` | `true` | Enable AVIF conversion |
 | `enableInitialPass` | `boolean` | `true` | Run a one-time conversion pass for existing files on server start |
+| `publicDir` | `string` | _(unset)_ | Explicit public directory used to resolve `public/...`-style `folders`/`exclude` entries, overriding Vite's own `publicDir` detection. Required for reliable Nuxt support (see [Nuxt Support](#nuxt-support)). |
 
 ## Path Resolution
 
 - Absolute paths are used as-is.
 - Relative paths are resolved from Vite `root`.
-- Paths that start with the configured public directory name, for example `public/img`, are resolved from the parent of Vite `publicDir`.
+- Paths that start with the configured public directory name, for example `public/img`, are resolved from the parent of the effective `publicDir` — the `publicDir` option if set, otherwise Vite's own detected `publicDir`.
 
-This keeps the plugin compatible with standard Vite apps and with frameworks such as Nuxt that can shift the effective Vite root.
+This keeps the plugin compatible with standard Vite apps. In frameworks like Nuxt,
+where Vite's own `publicDir` is always `false`, set the `publicDir` option explicitly
+to keep `public/...` paths working — see [Nuxt Support](#nuxt-support).
+
+At startup, the plugin logs each configured folder next to its resolved absolute path,
+and warns if a resolved folder doesn't exist on disk — use this to verify resolution
+before relying on the initial pass.
 
 ## Supported Formats
 
@@ -123,7 +147,7 @@ the server is running.
 ## Compatibility
 
 - Vite `4.x` to `8.x`
-- Nuxt projects powered by Vite, including `srcDir` setups
+- Nuxt projects powered by Vite, including `srcDir` setups (set the `publicDir` option, see [Nuxt Support](#nuxt-support))
 - Chokidar `3.5.3+` and `4.x`
 - Sharp `0.32+`, `0.33+`, `0.34+`
 - Node `20.19+`, regardless of which supported Vite major you use
