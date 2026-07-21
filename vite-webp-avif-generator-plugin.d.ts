@@ -41,6 +41,18 @@ export interface PluginConfig {
   enableInitialPass?: boolean;
 
   /**
+   * Native options passed unchanged to Sharp's `.webp()` output method.
+   * Omit this field to use Sharp's own WebP defaults.
+   */
+  webpOptions?: import('sharp').WebpOptions;
+
+  /**
+   * Native options passed unchanged to Sharp's `.avif()` output method.
+   * Omit this field to use Sharp's own AVIF defaults.
+   */
+  avifOptions?: import('sharp').AvifOptions;
+
+  /**
    * Explicit public directory used to resolve `public/...`-style `folders`/`exclude`
    * entries, overriding Vite's own `publicDir` detection.
    *

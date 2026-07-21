@@ -16,6 +16,8 @@ const LOG_LABEL = "[vite-webp-avif-generator]";
  * @property {string[]} [exclude=[]] - Folders to exclude
  * @property {boolean} [enableAvif=true] - Enable AVIF conversion
  * @property {boolean} [enableInitialPass=true] - Run a one-time conversion pass for existing files on server start
+ * @property {import("sharp").WebpOptions} [webpOptions] - Native options passed unchanged to `sharp().webp()`
+ * @property {import("sharp").AvifOptions} [avifOptions] - Native options passed unchanged to `sharp().avif()`
  * @property {string} [publicDir] - Explicit public directory used to resolve `public/...`-style
  *   `folders`/`exclude` entries. Overrides Vite's own `publicDir` detection, which is required
  *   for Nuxt (Vite's `publicDir` is always `false` there, regardless of `srcDir`).
@@ -32,8 +34,15 @@ export default function convertImages(config = {}) {
     exclude = [],
     enableAvif = true,
     enableInitialPass = true,
-    publicDir: publicDirOption
+    publicDir: publicDirOption,
+    webpOptions,
+    avifOptions
   } = config;
+
+  const formatOptions = {
+    webp: webpOptions,
+    avif: avifOptions
+  };
 
   const SUPPORTED_FORMATS = [".jpg", ".jpeg", ".png", ".webp"];
 
@@ -92,6 +101,7 @@ export default function convertImages(config = {}) {
           exclude: resolvedExclude,
           enableAvif,
           SUPPORTED_FORMATS,
+          formatOptions,
           logger
         });
       });
@@ -108,6 +118,7 @@ export default function convertImages(config = {}) {
             exclude: resolvedExclude,
             enableAvif,
             SUPPORTED_FORMATS,
+            formatOptions,
             logger
           });
         });
@@ -147,13 +158,22 @@ export default function convertImages(config = {}) {
  * @param {string[]} options.exclude - Absolute excluded folders
  * @param {boolean} options.enableAvif - Enable AVIF generation
  * @param {string[]} options.SUPPORTED_FORMATS - Supported source formats
+ * @param {{webp: import("sharp").WebpOptions|undefined, avif: import("sharp").AvifOptions|undefined}} options.formatOptions - Native Sharp options by target format
  * @param {import('vite').Logger} options.logger - Vite logger
  * @param {boolean} [options.isBulk=false] - Suppress per-file "already exists" logs during the initial pass
  * @returns {Promise<{converted: number, skipped: number, failed: number}>}
  */
 async function handleFileAdd(filePath, options) {
-  const { rootDir, publicDir, exclude, enableAvif, SUPPORTED_FORMATS, logger, isBulk = false } =
-    options;
+  const {
+    rootDir,
+    publicDir,
+    exclude,
+    enableAvif,
+    SUPPORTED_FORMATS,
+    formatOptions,
+    logger,
+    isBulk = false
+  } = options;
   const tally = { converted: 0, skipped: 0, failed: 0 };
 
   try {
@@ -193,7 +213,11 @@ async function handleFileAdd(filePath, options) {
 
     const results = await Promise.allSettled(
       conversions.map(({ format, targetPath }) =>
-        convertImage(filePath, targetPath, format, { quiet: isBulk, logger })
+        convertImage(filePath, targetPath, format, {
+          quiet: isBulk,
+          logger,
+          sharpOptions: formatOptions[format]
+        })
       )
     );
 
@@ -234,9 +258,15 @@ async function handleFileAdd(filePath, options) {
  * @param {Object} [options={}] - Conversion options
  * @param {boolean} [options.quiet=false] - Suppress the "target already exists" log line
  * @param {import('vite').Logger} [options.logger=console] - Vite logger
+ * @param {import("sharp").WebpOptions|import("sharp").AvifOptions} [options.sharpOptions] - Native options for the selected Sharp output method
  * @returns {Promise<"converted"|"skipped">}
  */
-async function convertImage(sourcePath, targetPath, format, { quiet = false, logger = console } = {}) {
+async function convertImage(
+  sourcePath,
+  targetPath,
+  format,
+  { quiet = false, logger = console, sharpOptions } = {}
+) {
   if (existsSync(targetPath)) {
     if (!quiet) {
       logger.info(`   ${format.toUpperCase()}: target already exists, skipping`);
@@ -248,7 +278,7 @@ async function convertImage(sourcePath, targetPath, format, { quiet = false, log
   const startTime = Date.now();
 
   try {
-    await sharp(sourcePath)[format]().toFile(tempPath);
+    await sharp(sourcePath)[format](sharpOptions).toFile(tempPath);
     await rename(tempPath, targetPath);
 
     const duration = Date.now() - startTime;
