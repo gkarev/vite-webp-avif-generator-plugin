@@ -90,6 +90,53 @@ leaks, whether the dev server shuts down or restarts in the same process.
 | `enableAvif` | `boolean` | `true` | Enable AVIF conversion |
 | `enableInitialPass` | `boolean` | `true` | Run a one-time conversion pass for existing files on server start |
 | `publicDir` | `string` | _(unset)_ | Explicit public directory used to resolve `public/...`-style `folders`/`exclude` entries, overriding Vite's own `publicDir` detection. Required for reliable Nuxt support (see [Nuxt Support](#nuxt-support)). |
+| `webpOptions` | `import('sharp').WebpOptions` | _(unset)_ | Native options passed unchanged to Sharp's `.webp()` method |
+| `avifOptions` | `import('sharp').AvifOptions` | _(unset)_ | Native options passed unchanged to Sharp's `.avif()` method |
+
+### Native Sharp output options
+
+`webpOptions` and `avifOptions` accept the same native option objects as Sharp's
+[`webp()` and `avif()` output methods](https://sharp.pixelplumbing.com/api-output/).
+The plugin passes these objects to Sharp unchanged and does not define its own compression
+defaults.
+
+```js
+convertImages({
+  webpOptions: {
+    quality: 82,
+    effort: 5,
+    smartSubsample: true,
+  },
+  avifOptions: {
+    quality: 48,
+    effort: 4,
+    chromaSubsampling: '4:2:0',
+  },
+})
+```
+
+This makes an existing direct Sharp setup easy to migrate:
+
+```js
+// Direct Sharp usage:
+await sharp(input).webp(webpOptions).toFile(target)
+
+// Equivalent plugin configuration:
+convertImages({ webpOptions })
+```
+
+Both fields are optional. When omitted, Sharp uses its own defaults, preserving the
+plugin's previous output behavior. The exact available properties follow the installed
+supported Sharp version.
+
+The migration covers Sharp's WebP/AVIF output-method options only. Arbitrary pipeline
+operations such as `resize()`, `rotate()`, `flatten()`, or metadata transforms are not
+part of these configuration objects.
+
+Existing targets are still skipped. If you change an option and want to regenerate an
+already-created `.webp` or `.avif`, delete that target file and let the initial pass or
+watcher create it again. A standalone `.webp` source is not re-encoded as WebP, so only
+`avifOptions` applies to its generated AVIF sibling.
 
 ## Path Resolution
 
