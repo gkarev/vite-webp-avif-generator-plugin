@@ -16,6 +16,7 @@ const LOG_LABEL = "[vite-webp-avif-generator]";
  * @property {string[]} [exclude=[]] - Folders to exclude
  * @property {boolean} [enableAvif=true] - Enable AVIF conversion
  * @property {boolean} [enableInitialPass=true] - Run a one-time conversion pass for existing files on server start
+ * @property {"replace"|"preserve"} [outputNaming="replace"] - Output filename strategy
  * @property {import("sharp").WebpOptions} [webpOptions] - Native options passed unchanged to `sharp().webp()`
  * @property {import("sharp").AvifOptions} [avifOptions] - Native options passed unchanged to `sharp().avif()`
  * @property {string} [publicDir] - Explicit public directory used to resolve `public/...`-style
@@ -34,10 +35,13 @@ export default function convertImages(config = {}) {
     exclude = [],
     enableAvif = true,
     enableInitialPass = true,
+    outputNaming: configuredOutputNaming = "replace",
     publicDir: publicDirOption,
     webpOptions,
     avifOptions
   } = config;
+
+  const outputNaming = configuredOutputNaming === "preserve" ? "preserve" : "replace";
 
   const formatOptions = {
     webp: webpOptions,
@@ -74,6 +78,39 @@ export default function convertImages(config = {}) {
       const resolvedExclude = exclude.map((folder) =>
         resolveConfiguredPath(folder, rootDir, publicDir)
       );
+      const handlerOptions = {
+        rootDir,
+        publicDir,
+        exclude: resolvedExclude,
+        enableAvif,
+        outputNaming,
+        SUPPORTED_FORMATS,
+        formatOptions,
+        logger
+      };
+      const activeTasks = new Set();
+      const activeFileTasks = new Map();
+
+      const trackTask = (task) => {
+        activeTasks.add(task);
+        task.then(
+          () => activeTasks.delete(task),
+          () => activeTasks.delete(task)
+        );
+        return task;
+      };
+
+      const processFileOnce = (filePath, overrides = {}) => {
+        const fileKey = normalizeComparisonPath(filePath);
+        const activeTask = activeFileTasks.get(fileKey);
+        if (activeTask) return activeTask;
+
+        const task = handleFileAdd(filePath, { ...handlerOptions, ...overrides }).finally(() => {
+          activeFileTasks.delete(fileKey);
+        });
+        activeFileTasks.set(fileKey, task);
+        return trackTask(task);
+      };
 
       logger.info(`\n${LOG_LABEL} Starting file watcher...`);
       logger.info(`${LOG_LABEL} Watched folders: ${folders.join(", ")}`);
@@ -94,16 +131,8 @@ export default function convertImages(config = {}) {
         }
       });
 
-      watcher.on("add", async (filePath) => {
-        await handleFileAdd(filePath, {
-          rootDir,
-          publicDir,
-          exclude: resolvedExclude,
-          enableAvif,
-          SUPPORTED_FORMATS,
-          formatOptions,
-          logger
-        });
+      watcher.on("add", (filePath) => {
+        void processFileOnce(filePath);
       });
 
       watcher.on("error", (error) => {
@@ -112,14 +141,13 @@ export default function convertImages(config = {}) {
 
       if (enableInitialPass) {
         watcher.once("ready", () => {
-          void runInitialPass(watchPaths, {
-            rootDir,
-            publicDir,
-            exclude: resolvedExclude,
-            enableAvif,
-            SUPPORTED_FORMATS,
-            formatOptions,
-            logger
+          const initialPassTask = runInitialPass(
+            watchPaths,
+            handlerOptions,
+            (filePath, overrides) => processFileOnce(filePath, overrides)
+          );
+          void trackTask(initialPassTask).catch((error) => {
+            logger.error(`${LOG_LABEL} Initial pass failed: ${error.message}`);
           });
         });
       }
@@ -131,18 +159,30 @@ export default function convertImages(config = {}) {
       // Vite server per environment (client/server) from the same plugin
       // object, so state must stay local to each `server` instance to avoid
       // one watcher's cleanup overwriting another's.
-      let watcherClosed = false;
+      let cleanupPromise;
       const originalClose = server.close.bind(server);
-      server.close = async (...args) => {
-        if (!watcherClosed) {
-          watcherClosed = true;
-          try {
-            await watcher.close();
-            logger.info(`\n${LOG_LABEL} File watcher stopped`);
-          } catch (error) {
-            logger.error(`${LOG_LABEL} Failed to close file watcher: ${error.message}`);
-          }
+      const cleanup = () => {
+        if (!cleanupPromise) {
+          cleanupPromise = (async () => {
+            let watcherClosed = false;
+            try {
+              await watcher.close();
+              watcherClosed = true;
+            } catch (error) {
+              logger.error(`${LOG_LABEL} Failed to close file watcher: ${error.message}`);
+            }
+
+            await Promise.allSettled([...activeTasks]);
+            if (watcherClosed) {
+              logger.info(`\n${LOG_LABEL} File watcher stopped`);
+            }
+          })();
         }
+        return cleanupPromise;
+      };
+
+      server.close = async (...args) => {
+        await cleanup();
         return originalClose(...args);
       };
     }
@@ -157,6 +197,7 @@ export default function convertImages(config = {}) {
  * @param {string} options.publicDir - Resolved Vite publicDir
  * @param {string[]} options.exclude - Absolute excluded folders
  * @param {boolean} options.enableAvif - Enable AVIF generation
+ * @param {"replace"|"preserve"} options.outputNaming - Output filename strategy
  * @param {string[]} options.SUPPORTED_FORMATS - Supported source formats
  * @param {{webp: import("sharp").WebpOptions|undefined, avif: import("sharp").AvifOptions|undefined}} options.formatOptions - Native Sharp options by target format
  * @param {import('vite').Logger} options.logger - Vite logger
@@ -169,6 +210,7 @@ async function handleFileAdd(filePath, options) {
     publicDir,
     exclude,
     enableAvif,
+    outputNaming,
     SUPPORTED_FORMATS,
     formatOptions,
     logger,
@@ -186,7 +228,7 @@ async function handleFileAdd(filePath, options) {
       return tally;
     }
 
-    if (isGeneratedFile(filePath)) {
+    if (isGeneratedFile(filePath, outputNaming)) {
       return tally;
     }
 
@@ -200,14 +242,14 @@ async function handleFileAdd(filePath, options) {
     if (!isWebP) {
       conversions.push({
         format: "webp",
-        targetPath: getTargetPath(filePath, "webp")
+        targetPath: getTargetPath(filePath, "webp", outputNaming)
       });
     }
 
     if (enableAvif) {
       conversions.push({
         format: "avif",
-        targetPath: getTargetPath(filePath, "avif")
+        targetPath: getTargetPath(filePath, "avif", outputNaming)
       });
     }
 
@@ -221,9 +263,6 @@ async function handleFileAdd(filePath, options) {
       )
     );
 
-    const successful = results.filter((result) => result.status === "fulfilled").length;
-    const failed = results.filter((result) => result.status === "rejected").length;
-
     for (const result of results) {
       if (result.status === "fulfilled") {
         if (result.value === "converted") {
@@ -236,11 +275,11 @@ async function handleFileAdd(filePath, options) {
       }
     }
 
-    if (successful > 0) {
-      logger.info(`${LOG_LABEL} Successfully converted: ${successful} format(s)`);
+    if (tally.converted > 0) {
+      logger.info(`${LOG_LABEL} Successfully converted: ${tally.converted} format(s)`);
     }
-    if (failed > 0) {
-      logger.info(`${LOG_LABEL} Conversion errors: ${failed}`);
+    if (tally.failed > 0) {
+      logger.info(`${LOG_LABEL} Conversion errors: ${tally.failed}`);
     }
   } catch (error) {
     tally.failed += 1;
@@ -418,13 +457,18 @@ function isInExcludedFolder(filePath, exclude) {
 /**
  * Detect generated WebP/AVIF files to avoid loops.
  * @param {string} filePath - File path
+ * @param {"replace"|"preserve"} [outputNaming="replace"] - Output filename strategy
  * @returns {boolean}
  */
-function isGeneratedFile(filePath) {
+function isGeneratedFile(filePath, outputNaming = "replace") {
   const ext = extname(filePath).toLowerCase();
 
   if (![".avif", ".webp"].includes(ext)) {
     return false;
+  }
+
+  if (outputNaming === "preserve") {
+    return existsSync(filePath.slice(0, -ext.length));
   }
 
   const fileNameWithoutExt = basename(filePath, ext);
@@ -441,13 +485,81 @@ function isGeneratedFile(filePath) {
  * Build a target path for the requested output format.
  * @param {string} sourcePath - Source image path
  * @param {string} format - Target format
+ * @param {"replace"|"preserve"} [outputNaming="replace"] - Output filename strategy
  * @returns {string}
  */
-function getTargetPath(sourcePath, format) {
+function getTargetPath(sourcePath, format, outputNaming = "replace") {
   const dir = dirname(sourcePath);
+
+  if (outputNaming === "preserve") {
+    return resolve(dir, `${basename(sourcePath)}.${format}`);
+  }
+
   const ext = extname(sourcePath);
   const name = basename(sourcePath, ext);
   return resolve(dir, `${name}.${format}`);
+}
+
+/**
+ * Warn when distinct sources would write the same target in replace mode.
+ * @param {string[]} files - Unique absolute source paths
+ * @param {Object} options - Handler options
+ */
+function warnAboutTargetCollisions(files, options) {
+  const {
+    rootDir,
+    publicDir,
+    exclude,
+    enableAvif,
+    outputNaming,
+    SUPPORTED_FORMATS,
+    logger
+  } = options;
+
+  if (outputNaming !== "replace") {
+    return;
+  }
+
+  const sourcesByTarget = new Map();
+
+  for (const filePath of files) {
+    const ext = extname(filePath).toLowerCase();
+    if (
+      !SUPPORTED_FORMATS.includes(ext) ||
+      isInExcludedFolder(filePath, exclude) ||
+      isGeneratedFile(filePath, outputNaming)
+    ) {
+      continue;
+    }
+
+    const formats = [];
+    if (ext !== ".webp") formats.push("webp");
+    if (enableAvif) formats.push("avif");
+
+    for (const format of formats) {
+      const targetPath = getTargetPath(filePath, format, outputNaming);
+      const targetKey = normalizeComparisonPath(targetPath);
+      const collision = sourcesByTarget.get(targetKey) ?? {
+        targetPath,
+        sources: new Map()
+      };
+      collision.sources.set(normalizeComparisonPath(filePath), filePath);
+      sourcesByTarget.set(targetKey, collision);
+    }
+  }
+
+  for (const { targetPath, sources } of sourcesByTarget.values()) {
+    if (sources.size < 2) continue;
+
+    const sourceList = [...sources.values()]
+      .map((sourcePath) => getDisplayPath(sourcePath, rootDir, publicDir))
+      .join(", ");
+    logger.warnOnce(
+      `${LOG_LABEL} Warning: multiple sources map to the same output ` +
+        `${getDisplayPath(targetPath, rootDir, publicDir)} (${sourceList}). ` +
+        `Use outputNaming: "preserve" to keep every derivative distinct.`
+    );
+  }
 }
 
 /**
@@ -537,20 +649,29 @@ async function runWithConcurrencyLimit(items, limit, worker) {
  * Run a one-time idempotent conversion pass for files already present in watched folders.
  * @param {string[]} watchPaths - Absolute watched folder paths
  * @param {Object} handlerOptions - Options forwarded to handleFileAdd
+ * @param {(filePath: string, options: Object) => Promise<{converted: number, skipped: number, failed: number}>} [processFile=handleFileAdd] - File processor
  * @returns {Promise<void>}
  */
-async function runInitialPass(watchPaths, handlerOptions) {
+async function runInitialPass(watchPaths, handlerOptions, processFile = handleFileAdd) {
   const { logger } = handlerOptions;
   const filesByFolder = await Promise.all(
     watchPaths.map((folder) => (existsSync(folder) ? listFilesRecursively(folder, logger) : []))
   );
-  const files = filesByFolder.flat();
+  const files = [
+    ...new Map(
+      filesByFolder
+        .flat()
+        .map((filePath) => [normalizeComparisonPath(filePath), filePath])
+    ).values()
+  ];
+
+  warnAboutTargetCollisions(files, handlerOptions);
 
   const summary = { processed: files.length, converted: 0, skipped: 0, failed: 0 };
   const concurrency = Math.max(MIN_BULK_CONCURRENCY, cpus().length);
 
   await runWithConcurrencyLimit(files, concurrency, async (filePath) => {
-    const result = await handleFileAdd(filePath, { ...handlerOptions, isBulk: true });
+    const result = await processFile(filePath, { ...handlerOptions, isBulk: true });
     summary.converted += result.converted;
     summary.skipped += result.skipped;
     summary.failed += result.failed;

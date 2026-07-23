@@ -218,6 +218,51 @@ async function group3_logLevelRespected() {
   check("info: default logger prints labeled output", printed);
 }
 
+/**
+ * Group 4: an idempotent pass may skip existing targets, but must not report
+ * those fulfilled "skipped" results as successful conversions.
+ */
+async function group4_idempotentCounts() {
+  console.log("\n## Group 4: idempotent pass reports converted count accurately");
+
+  const caseDir = resolve(scratchRoot, "idempotent");
+  await createFixture(resolve(caseDir, "public/img/pic.png"));
+
+  const first = createCaptureLogger();
+  const firstServer = await createServer({
+    root: caseDir,
+    publicDir: resolve(caseDir, "public"),
+    configFile: false,
+    customLogger: first.logger,
+    server: { middlewareMode: true },
+    plugins: [convertImages({ folders: ["public/img"], enableInitialPass: true })]
+  });
+  await waitFor(() => first.text().includes("Initial pass complete"));
+  await firstServer.close();
+
+  const second = createCaptureLogger();
+  const secondServer = await createServer({
+    root: caseDir,
+    publicDir: resolve(caseDir, "public"),
+    configFile: false,
+    customLogger: second.logger,
+    server: { middlewareMode: true },
+    plugins: [convertImages({ folders: ["public/img"], enableInitialPass: true })]
+  });
+  await waitFor(() => second.text().includes("Initial pass complete"));
+  await secondServer.close();
+
+  check(
+    "idempotent: summary reports zero converted formats",
+    second.text().includes("converted 0, skipped 2, failed 0")
+  );
+  check(
+    "idempotent: skipped targets are not logged as successful conversions",
+    second.count("Successfully converted") === 0,
+    `count=${second.count("Successfully converted")}`
+  );
+}
+
 async function main() {
   console.log("Running logging checks...");
   await rm(scratchRoot, { recursive: true, force: true });
@@ -226,6 +271,7 @@ async function main() {
     await group1_standardVite();
     await group2_nuxtLike();
     await group3_logLevelRespected();
+    await group4_idempotentCounts();
   } finally {
     await rm(scratchRoot, { recursive: true, force: true });
   }

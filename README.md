@@ -8,6 +8,7 @@ Vite plugin for automatic image conversion to WebP and AVIF during dev server ru
 - Runs a one-time initial pass on server start to convert pre-existing images
 - Skips existing targets to avoid extra work
 - Avoids loops on generated `.webp` and `.avif` files
+- Offers an opt-in collision-safe output naming strategy
 - Runs WebP and AVIF conversions in parallel
 - Writes converted files atomically (temp file + rename)
 - Supports Vite `publicDir` when it lives outside Vite `root`
@@ -89,6 +90,7 @@ leaks, whether the dev server shuts down or restarts in the same process.
 | `exclude` | `string[]` | `[]` | Folders to exclude |
 | `enableAvif` | `boolean` | `true` | Enable AVIF conversion |
 | `enableInitialPass` | `boolean` | `true` | Run a one-time conversion pass for existing files on server start |
+| `outputNaming` | `'replace' \| 'preserve'` | `'replace'` | Choose whether generated names replace or preserve the source extension |
 | `publicDir` | `string` | _(unset)_ | Explicit public directory used to resolve `public/...`-style `folders`/`exclude` entries, overriding Vite's own `publicDir` detection. Required for reliable Nuxt support (see [Nuxt Support](#nuxt-support)). |
 | `webpOptions` | `import('sharp').WebpOptions` | _(unset)_ | Native options passed unchanged to Sharp's `.webp()` method |
 | `avifOptions` | `import('sharp').AvifOptions` | _(unset)_ | Native options passed unchanged to Sharp's `.avif()` method |
@@ -138,6 +140,33 @@ already-created `.webp` or `.avif`, delete that target file and let the initial 
 watcher create it again. A standalone `.webp` source is not re-encoded as WebP, so only
 `avifOptions` applies to its generated AVIF sibling.
 
+### Output file names and collisions
+
+The default `outputNaming: 'replace'` keeps the existing filename contract:
+
+```text
+logo.png -> logo.webp, logo.avif
+```
+
+Because the original extension is removed, distinct sources with the same basename in
+one directory, such as `logo.png` and `logo.jpg`, map to the same output files. The
+initial pass reports a warning for each colliding target. Use the opt-in
+`outputNaming: 'preserve'` strategy when both sources must have independent derivatives:
+
+```js
+convertImages({
+  outputNaming: 'preserve',
+})
+```
+
+```text
+logo.png -> logo.png.webp, logo.png.avif
+logo.jpg -> logo.jpg.webp, logo.jpg.avif
+hero.webp -> hero.webp.avif
+```
+
+The default remains `replace` for backward compatibility with existing asset URLs.
+
 ## Path Resolution
 
 - Absolute paths are used as-is.
@@ -186,17 +215,22 @@ event so live watching is fully active, then runs a one-time pass over all files
 present in the watched folders, applying the same filters and idempotency checks as live
 additions (existing targets are skipped without invoking `sharp`). The pass recurses into
 subfolders, does not follow symlinks, limits how many conversions run concurrently, and
-finishes with a single summary log line (processed/converted/skipped/failed).
+deduplicates physical source paths when watched folders overlap. It finishes with a
+single summary log line (processed/converted/skipped/failed).
 
 Set `enableInitialPass: false` to disable this pass and only convert files added while
 the server is running.
+
+When the Vite dev server closes or restarts, its watcher stops accepting new work and
+`server.close()` waits for already registered live and initial-pass conversions before
+the shutdown completes.
 
 ## Compatibility
 
 - Vite `4.x` to `8.x`
 - Nuxt projects powered by Vite, including `srcDir` setups (set the `publicDir` option, see [Nuxt Support](#nuxt-support))
 - Chokidar `3.5.3+`, `4.x`, and `5.x`
-- Sharp `0.32+`, `0.33+`, `0.34+`, and `0.35+`
+- Sharp `0.35+` (the minimum excludes vulnerable Sharp/libvips versions)
 - Node `20.19+`, regardless of which supported Vite major you use
 
 The plugin declares `"engines": { "node": ">=20.19.0" }` unconditionally, so this Node

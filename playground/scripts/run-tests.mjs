@@ -184,6 +184,29 @@ async function removeDerivatives() {
   await walk(resolve(root, "public/img"));
 }
 
+async function removeTemporaryOutputs() {
+  async function walk(dir) {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const full = resolve(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full);
+      } else if (entry.isFile() && entry.name.endsWith(".tmp")) {
+        await rm(full, { force: true });
+      }
+    }
+  }
+
+  await walk(resolve(root, "src/img"));
+  await walk(resolve(root, "public/img"));
+}
+
 function writeConfig(overrides = {}) {
   const {
     folders = ["src/img", "public/img"],
@@ -558,12 +581,19 @@ async function testSection12() {
   if (tmpFiles.length === 0) pass("12", "No leftover temp files");
   else fail("12", "No leftover temp files", tmpFiles.join(", "));
 
-  if (!(await exists(webpPath))) {
-    pass("12", "No partial webp after kill");
-  } else {
-    const size = (await stat(webpPath)).size;
-    if (size > 100) pass("12", "webp complete after kill race", `${size} bytes`);
-    else fail("12", "webp looks truncated", `${size} bytes`);
+  try {
+    if (!(await exists(webpPath))) {
+      pass("12", "No partial webp after kill");
+    } else {
+      const size = (await stat(webpPath)).size;
+      if (size > 100) pass("12", "webp complete after kill race", `${size} bytes`);
+      else fail("12", "webp looks truncated", `${size} bytes`);
+    }
+  } finally {
+    // SIGKILL cannot run plugin cleanup and may interrupt unrelated parallel
+    // fixture conversions. Remove their private temp outputs so the test suite
+    // itself does not leave the working tree dirty.
+    await removeTemporaryOutputs();
   }
 }
 

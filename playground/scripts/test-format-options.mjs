@@ -79,13 +79,27 @@ async function waitForInitialPass(capture) {
   }
 }
 
+async function resetCaseDir(caseDir) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await rm(caseDir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (error.code !== "EBUSY" || attempt === 4) {
+        throw error;
+      }
+      await delay(200);
+    }
+  }
+}
+
 async function runInitialCase(name, pluginOptions, prepareTarget) {
   const caseDir = resolve(scratchRoot, name);
   const sourcePath = resolve(caseDir, "public/img/sample.png");
   const webpPath = resolve(caseDir, "public/img/sample.webp");
   const avifPath = resolve(caseDir, "public/img/sample.avif");
 
-  await rm(caseDir, { recursive: true, force: true });
+  await resetCaseDir(caseDir);
   await createDetailedPng(sourcePath);
   if (prepareTarget) await prepareTarget({ sourcePath, webpPath, avifPath });
 
@@ -95,6 +109,7 @@ async function runInitialCase(name, pluginOptions, prepareTarget) {
     await waitForInitialPass(capture);
   } finally {
     await server.close();
+    await delay(300);
   }
 
   return { caseDir, sourcePath, webpPath, avifPath, capture };
@@ -106,7 +121,7 @@ async function runLiveCase(name, pluginOptions) {
   const webpPath = resolve(caseDir, "public/img/live.webp");
   const avifPath = resolve(caseDir, "public/img/live.avif");
 
-  await rm(caseDir, { recursive: true, force: true });
+  await resetCaseDir(caseDir);
   const capture = createCaptureLogger();
   const server = await startServer(caseDir, pluginOptions, capture);
 
@@ -119,6 +134,7 @@ async function runLiveCase(name, pluginOptions) {
     }
   } finally {
     await server.close();
+    await delay(300);
   }
 
   return { sourcePath, webpPath, avifPath, capture };
@@ -192,6 +208,38 @@ async function testExistingTargetIsUntouched() {
   check("existing WebP mtime is unchanged", afterMtimeMs === beforeMtimeMs);
 }
 
+async function testWebpSourceUsesAvifOptionsOnly() {
+  console.log("\n## WebP source uses avifOptions only");
+  const caseDir = resolve(scratchRoot, "webp-source-avif-only");
+  const sourcePath = resolve(caseDir, "public/img/sample.webp");
+  const avifPath = resolve(caseDir, "public/img/sample.avif");
+  const webpOptions = { quality: 1 };
+  const avifOptions = { quality: 52, effort: 0, chromaSubsampling: "4:2:0" };
+
+  await resetCaseDir(caseDir);
+  const seedPng = resolve(caseDir, "public/img/_seed.png");
+  await createDetailedPng(seedPng);
+  const sourceWebp = await encodeDirect(seedPng, "webp", { quality: 88, effort: 4 });
+  await writeFile(sourcePath, sourceWebp);
+
+  const capture = createCaptureLogger();
+  const server = await startServer(caseDir, { webpOptions, avifOptions }, capture);
+  try {
+    await waitForInitialPass(capture);
+  } finally {
+    await server.close();
+    await delay(300);
+  }
+
+  const actualSource = await readFile(sourcePath);
+  const actualAvif = await readFile(avifPath);
+  const expectedAvif = await encodeDirect(actualSource, "avif", avifOptions);
+
+  check("WebP source bytes are unchanged", actualSource.equals(sourceWebp));
+  check("AVIF sibling is created", existsSync(avifPath));
+  check("AVIF equals direct Sharp output with avifOptions", actualAvif.equals(expectedAvif));
+}
+
 async function testInvalidNativeValue() {
   console.log("\n## One Sharp error does not block the other format");
   const avifOptions = { quality: 41, effort: 0 };
@@ -214,16 +262,24 @@ async function testInvalidNativeValue() {
 
 async function main() {
   console.log("Running native Sharp format option checks...");
-  await rm(scratchRoot, { recursive: true, force: true });
 
   try {
     await testInitialPassNativeOptions();
     await testLiveNativeOptions();
     await testOmittedOptions();
     await testExistingTargetIsUntouched();
+    await testWebpSourceUsesAvifOptionsOnly();
     await testInvalidNativeValue();
   } finally {
-    await rm(scratchRoot, { recursive: true, force: true });
+    // Drop libvips' file cache before removing Windows fixtures. All plugin
+    // servers are closed at this point, so no conversion can still use it.
+    sharp.cache(false);
+    await rm(scratchRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 200
+    });
   }
 
   const passed = results.filter((result) => result.ok).length;

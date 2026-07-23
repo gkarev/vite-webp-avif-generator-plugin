@@ -5,12 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.4.0] - 2026-07-22
 
 ### Added
 - Optional native `webpOptions` and `avifOptions`, passed unchanged to Sharp's
   `.webp()` and `.avif()` methods. Omitting them preserves Sharp defaults and existing
   generated targets continue to be skipped.
+- Optional `outputNaming: "preserve"` strategy, which keeps the source extension in
+  generated names (`logo.png.webp`) so same-basename sources cannot overwrite each
+  other's derivatives. The default remains `"replace"` for backward compatibility.
+- A single `npm run verify` release gate covering syntax, focused and regression tests,
+  production dependency audit, and the npm package allowlist. `prepublishOnly` now runs
+  this gate automatically.
+
+### Fixed
+- Deduplicated source paths from duplicate or overlapping watched folders during the
+  initial pass.
+- Added collision warnings in the default `"replace"` naming mode when distinct sources
+  resolve to the same WebP or AVIF target.
+- Made `server.close()` wait for registered initial-pass and live conversion work before
+  completing shutdown, while preserving per-server watcher cleanup for middleware-mode
+  and Nuxt restarts.
+- Corrected per-file success logs so existing targets counted as `skipped` are no longer
+  reported as successful conversions.
+- Replaced a timing-dependent race-test log-order assertion with observable output
+  invariants and made the Windows format-options fixture cleanup fail visibly.
+
+### Security
+- Raised the Sharp dependency floor to `^0.35.0`, excluding versions affected by the
+  inherited libvips vulnerabilities reported by `GHSA-f88m-g3jw-g9cj`.
 
 ## [2.3.1] - 2026-07-05
 

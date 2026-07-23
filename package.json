@@ -1,6 +1,6 @@
 {
   "name": "vite-webp-avif-generator-plugin",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "description": "Vite plugin for automatic image conversion to WebP and AVIF formats in dev mode",
   "author": "Karev G.S.",
   "license": "MIT",
@@ -47,13 +47,15 @@
   },
   "dependencies": {
     "chokidar": "^3.5.3 || ^4.0.0 || ^5.0.0",
-    "sharp": "^0.32.0 || ^0.33.0 || ^0.34.0 || ^0.35.0"
+    "sharp": "^0.35.0"
   },
   "devDependencies": {
     "vite": "^8.0.3"
   },
   "scripts": {
     "dev:playground": "vite --config playground/vite.config.js",
-    "prepublishOnly": "echo 'Ready to publish!'"
+    "test": "npm run verify",
+    "verify": "node --check vite-webp-avif-generator-plugin.js && node playground/scripts/test-format-options.mjs && node playground/scripts/test-output-naming.mjs && node playground/scripts/test-active-work-cleanup.mjs && node playground/scripts/run-tests.mjs && node playground/scripts/test-logging.mjs && node playground/scripts/test-nuxt-srcdir-public.mjs && node playground/scripts/test-nuxt-watcher-cleanup.mjs && node playground/scripts/test-race-initial-pass.mjs && npm audit --omit=dev && npm pack --dry-run --ignore-scripts",
+    "prepublishOnly": "npm run verify"
   }
 }

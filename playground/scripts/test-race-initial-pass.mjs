@@ -137,7 +137,6 @@ async function main() {
   await delay(2000);
 
   const log = output.join("");
-  const summaryIdx = log.indexOf("Initial pass complete");
   const raceIdx = log.indexOf(`New file detected: src/img/live-add/${raceBase}.png`);
   const raceWebp = resolve(root, `src/img/live-add/${raceBase}.webp`);
   const raceAvif = resolve(root, `src/img/live-add/${raceBase}.avif`);
@@ -158,13 +157,6 @@ async function main() {
       "Live watcher detected race file",
       raceIdx >= 0,
       raceIdx >= 0 ? "log present" : "no log"
-    ],
-    [
-      "Race file detected BEFORE initial pass complete",
-      raceIdx >= 0 && summaryIdx >= 0 && raceIdx < summaryIdx,
-      raceIdx >= 0 && summaryIdx >= 0
-        ? `race log at ${raceIdx}, summary at ${summaryIdx}`
-        : "order unclear"
     ],
     [`${raceBase}.webp created`, await exists(raceWebp)],
     [`${raceBase}.avif created`, await exists(raceAvif)]

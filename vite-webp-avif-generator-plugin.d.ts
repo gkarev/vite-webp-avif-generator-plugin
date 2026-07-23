@@ -41,6 +41,15 @@ export interface PluginConfig {
   enableInitialPass?: boolean;
 
   /**
+   * Output filename strategy. `replace` drops the source extension
+   * (`logo.png` -> `logo.webp`); `preserve` keeps it
+   * (`logo.png` -> `logo.png.webp`).
+   *
+   * @default 'replace'
+   */
+  outputNaming?: 'replace' | 'preserve';
+
+  /**
    * Native options passed unchanged to Sharp's `.webp()` output method.
    * Omit this field to use Sharp's own WebP defaults.
    */
