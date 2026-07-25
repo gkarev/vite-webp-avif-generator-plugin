@@ -257,7 +257,12 @@ async function testInvalidNativeValue() {
   check("successful AVIF equals direct Sharp output", actualAvif.equals(expectedAvif));
   check("Sharp validation error is logged", result.capture.text().includes("conversion failed"));
   check("initial summary counts the failure", /failed 1\b/.test(result.capture.text()));
-  check("failed conversion leaves no temp file", !entries.some((entry) => entry.endsWith(".tmp")));
+  const hasStagingFile = entries.some(
+    (entry) =>
+      entry.endsWith(".tmp") ||
+      /^.+\.vite-webp-avif-generator\.[0-9a-f]{16}\.incomplete$/.test(entry)
+  );
+  check("failed conversion leaves no staging file", !hasStagingFile);
 }
 
 async function main() {

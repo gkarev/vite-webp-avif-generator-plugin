@@ -1,4 +1,6 @@
 import { spawn } from "child_process";
+import { randomBytes } from "crypto";
+import { watch } from "fs";
 import {
   copyFile,
   mkdir,
@@ -11,6 +13,7 @@ import {
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { setTimeout as delay } from "timers/promises";
+import sharp from "sharp";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(root, "..");
@@ -19,6 +22,8 @@ const results = [];
 // process is the actual Vite dev server, not an npx wrapper process that
 // could exit on SIGTERM while leaving an orphaned Vite grandchild behind.
 const viteBinPath = resolve(repoRoot, "node_modules/vite/bin/vite.js");
+const INCOMPLETE_FILE_PATTERN =
+  /^.+\.vite-webp-avif-generator\.[0-9a-f]{16}\.incomplete$/;
 
 function pass(section, name, detail = "") {
   results.push({ section, name, ok: true, detail });
@@ -37,6 +42,46 @@ async function exists(path) {
   } catch {
     return false;
   }
+}
+
+async function waitFor(predicate, { timeoutMs = 30000, intervalMs = 10 } = {}) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const value = await predicate();
+    if (value) return value;
+    await delay(intervalMs);
+  }
+  return undefined;
+}
+
+function watchForIncomplete(dirPath) {
+  let watcher;
+  const promise = new Promise((resolve) => {
+    watcher = watch(dirPath, (_, filename) => {
+      const entry = filename?.toString();
+      if (entry && INCOMPLETE_FILE_PATTERN.test(entry)) {
+        resolve(entry);
+      }
+    });
+    watcher.once("error", () => resolve(undefined));
+  });
+
+  return {
+    promise,
+    close: () => watcher?.close()
+  };
+}
+
+async function createInterruptFixture(filePath) {
+  const width = 2200;
+  const height = 2200;
+  const channels = 3;
+  await mkdir(dirname(filePath), { recursive: true });
+  await sharp(randomBytes(width * height * channels), {
+    raw: { width, height, channels }
+  })
+    .png({ compressionLevel: 0 })
+    .toFile(filePath);
 }
 
 async function runVite(configPath, { until, timeoutMs = 30000, env = {} } = {}) {
@@ -184,35 +229,13 @@ async function removeDerivatives() {
   await walk(resolve(root, "public/img"));
 }
 
-async function removeTemporaryOutputs() {
-  async function walk(dir) {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      const full = resolve(dir, entry.name);
-      if (entry.isDirectory()) {
-        await walk(full);
-      } else if (entry.isFile() && entry.name.endsWith(".tmp")) {
-        await rm(full, { force: true });
-      }
-    }
-  }
-
-  await walk(resolve(root, "src/img"));
-  await walk(resolve(root, "public/img"));
-}
-
 function writeConfig(overrides = {}) {
   const {
     folders = ["src/img", "public/img"],
     exclude = ["src/img/excluded", "public/img/excluded"],
     enableAvif = true,
-    enableInitialPass = true
+    enableInitialPass = true,
+    avifOptions
   } = overrides;
 
   return `import { defineConfig } from "vite";
@@ -227,7 +250,9 @@ export default defineConfig({
       folders: ${JSON.stringify(folders)},
       exclude: ${JSON.stringify(exclude)},
       enableAvif: ${enableAvif},
-      enableInitialPass: ${enableInitialPass}
+      enableInitialPass: ${enableInitialPass}${
+        avifOptions ? `,\n      avifOptions: ${JSON.stringify(avifOptions)}` : ""
+      }
     })
   ]
 });
@@ -561,39 +586,88 @@ async function testSection11() {
 
 async function testSection12() {
   console.log("\n## 12. Atomic write / interrupt");
-  await resetFixtures();
-  await removeDerivatives();
-  await rm(resolve(root, "src/img/initial-pass/fresh.webp"), { force: true });
+  const testDir = resolve(root, "src/img/interrupt-test");
+  const sourcePath = resolve(testDir, "slow.png");
+  const configPath = resolve(root, "scripts/.test-interrupt.config.js");
+  let child;
 
-  const child = spawn(process.execPath, [viteBinPath, "--config", defaultConfigPath], {
-    cwd: repoRoot,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  await delay(400);
-  child.kill("SIGKILL");
-  await new Promise((resolveExit) => child.once("exit", resolveExit));
-
-  const webpPath = resolve(root, "src/img/initial-pass/fresh.webp");
-  const tmpFiles = (await readdir(resolve(root, "src/img/initial-pass"))).filter((f) =>
-    f.includes(".tmp")
+  await rm(testDir, { recursive: true, force: true });
+  await createInterruptFixture(sourcePath);
+  await writeFile(
+    configPath,
+    writeConfig({
+      folders: ["src/img/interrupt-test"],
+      exclude: [],
+      enableAvif: true,
+      enableInitialPass: true,
+      avifOptions: { effort: 9 }
+    })
   );
 
-  if (tmpFiles.length === 0) pass("12", "No leftover temp files");
-  else fail("12", "No leftover temp files", tmpFiles.join(", "));
-
   try {
-    if (!(await exists(webpPath))) {
-      pass("12", "No partial webp after kill");
+    const incompleteObserver = watchForIncomplete(testDir);
+    child = spawn(process.execPath, [viteBinPath, "--config", configPath], {
+      cwd: repoRoot,
+      stdio: "ignore"
+    });
+
+    const observedIncomplete = await Promise.race([
+      incompleteObserver.promise,
+      waitFor(async () => {
+        const entries = await readdir(testDir);
+        return entries.find((entry) => INCOMPLETE_FILE_PATTERN.test(entry));
+      })
+    ]);
+    incompleteObserver.close();
+
+    if (observedIncomplete) {
+      pass("12", "Diagnostic incomplete filename observed", observedIncomplete);
     } else {
-      const size = (await stat(webpPath)).size;
-      if (size > 100) pass("12", "webp complete after kill race", `${size} bytes`);
-      else fail("12", "webp looks truncated", `${size} bytes`);
+      fail("12", "Diagnostic incomplete filename observed");
+      return;
+    }
+
+    child.kill("SIGKILL");
+    await new Promise((resolveExit) => {
+      if (child.exitCode !== null) resolveExit();
+      else child.once("exit", resolveExit);
+    });
+    child = undefined;
+
+    const entries = await readdir(testDir);
+    const incompleteFiles = entries.filter((entry) =>
+      INCOMPLETE_FILE_PATTERN.test(entry)
+    );
+    if (incompleteFiles.length > 0) {
+      pass("12", "Interrupted conversion remains visibly incomplete", incompleteFiles.join(", "));
+    } else {
+      fail("12", "Interrupted conversion remains visibly incomplete");
+    }
+
+    let finalTargetsAreValid = true;
+    for (const targetPath of [
+      resolve(testDir, "slow.webp"),
+      resolve(testDir, "slow.avif")
+    ]) {
+      if (!await exists(targetPath)) continue;
+      try {
+        await sharp(targetPath).metadata();
+      } catch {
+        finalTargetsAreValid = false;
+      }
+    }
+    if (finalTargetsAreValid) {
+      pass("12", "Published targets are absent or decodable");
+    } else {
+      fail("12", "Published targets are absent or decodable");
     }
   } finally {
-    // SIGKILL cannot run plugin cleanup and may interrupt unrelated parallel
-    // fixture conversions. Remove their private temp outputs so the test suite
-    // itself does not leave the working tree dirty.
-    await removeTemporaryOutputs();
+    if (child && child.exitCode === null) {
+      child.kill("SIGKILL");
+      await new Promise((resolveExit) => child.once("exit", resolveExit));
+    }
+    await rm(configPath, { force: true });
+    await rm(testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 

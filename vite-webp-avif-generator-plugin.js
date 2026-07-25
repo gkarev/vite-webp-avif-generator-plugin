@@ -297,6 +297,18 @@ async function handleFileAdd(filePath, options) {
 }
 
 /**
+ * Build a unique, self-describing staging path beside the final target.
+ * @param {string} targetPath - Final output path
+ * @returns {string}
+ */
+function createIncompletePath(targetPath) {
+  return (
+    `${targetPath}.vite-webp-avif-generator.` +
+    `${randomBytes(8).toString("hex")}.incomplete`
+  );
+}
+
+/**
  * Convert an image to the requested format using an atomic write (temp file + rename).
  * @param {string} sourcePath - Source image path
  * @param {string} targetPath - Target image path
@@ -320,7 +332,7 @@ async function convertImage(
     return "skipped";
   }
 
-  const tempPath = `${targetPath}.${randomBytes(4).toString("hex")}.tmp`;
+  const tempPath = createIncompletePath(targetPath);
   const startTime = Date.now();
 
   try {
