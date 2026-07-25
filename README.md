@@ -10,7 +10,7 @@ Vite plugin for automatic image conversion to WebP and AVIF during dev server ru
 - Avoids loops on generated `.webp` and `.avif` files
 - Offers an opt-in collision-safe output naming strategy
 - Runs WebP and AVIF conversions in parallel
-- Writes converted files atomically (temp file + rename)
+- Publishes converted files atomically and leaves a clearly named `.incomplete` diagnostic after an abrupt interruption
 - Supports Vite `publicDir` when it lives outside Vite `root`
 - Optional `publicDir` override for frameworks (like Nuxt) where Vite's own `publicDir` can't be auto-detected
 - Works in dev only via `apply: 'serve'`
@@ -203,9 +203,21 @@ On each new file:
 5. Run conversions with `Promise.allSettled`
 6. Log success and error counts
 
-Files are converted atomically: each output is written to a temporary file next to the
-target and then renamed into place, so an interrupted conversion never leaves a partial
-target file behind.
+Files are converted atomically. Each output is first written beside its target with a
+name such as
+`image.webp.vite-webp-avif-generator.a1b2c3d4e5f60708.incomplete`, then renamed to
+`image.webp` only after Sharp finishes successfully. Vite and the watcher do not treat
+the `.incomplete` suffix as an image source.
+
+Ordinary caught errors remove their staging file best-effort. If the process is stopped
+abruptly, for example with `SIGKILL`, cleanup cannot run and the self-describing file may
+remain in the working tree. It is intentionally not covered by a plugin-specific
+`.gitignore` rule: its presence tells the developer that publication did not complete,
+and it must not be used or committed as an image.
+
+Whenever the watcher becomes ready, the plugin removes only files matching its exact
+owned `.incomplete` pattern that are at least 24 hours old. Fresh files, arbitrary
+`.incomplete` or `.tmp` files, excluded folders, and symlinks are left untouched.
 
 ### Initial Pass
 

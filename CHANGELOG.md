@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A single `npm run verify` release gate covering syntax, focused and regression tests,
   production dependency audit, and the npm package allowlist. `prepublishOnly` now runs
   this gate automatically.
+- Replaced opaque atomic-write temp names with self-describing plugin-owned
+  `.incomplete` names, while keeping target-local staging and atomic rename publication.
+- Added conservative startup cleanup for exact plugin-owned `.incomplete` files older
+  than 24 hours; foreign, fresh, excluded, and symlinked entries are preserved.
+- Corrected the forced-interruption regression to accept the unavoidable diagnostic
+  artifact after `SIGKILL` and validate any published image by decoding it with Sharp.
 
 ### Fixed
 - Deduplicated source paths from duplicate or overlapping watched folders during the
