@@ -590,22 +590,23 @@ async function testSection12() {
   const sourcePath = resolve(testDir, "slow.png");
   const configPath = resolve(root, "scripts/.test-interrupt.config.js");
   let child;
-
-  await rm(testDir, { recursive: true, force: true });
-  await createInterruptFixture(sourcePath);
-  await writeFile(
-    configPath,
-    writeConfig({
-      folders: ["src/img/interrupt-test"],
-      exclude: [],
-      enableAvif: true,
-      enableInitialPass: true,
-      avifOptions: { effort: 9 }
-    })
-  );
+  let incompleteObserver;
 
   try {
-    const incompleteObserver = watchForIncomplete(testDir);
+    await rm(testDir, { recursive: true, force: true });
+    await createInterruptFixture(sourcePath);
+    await writeFile(
+      configPath,
+      writeConfig({
+        folders: ["src/img/interrupt-test"],
+        exclude: [],
+        enableAvif: true,
+        enableInitialPass: true,
+        avifOptions: { effort: 9 }
+      })
+    );
+
+    incompleteObserver = watchForIncomplete(testDir);
     child = spawn(process.execPath, [viteBinPath, "--config", configPath], {
       cwd: repoRoot,
       stdio: "ignore"
@@ -619,6 +620,7 @@ async function testSection12() {
       })
     ]);
     incompleteObserver.close();
+    incompleteObserver = undefined;
 
     if (observedIncomplete) {
       pass("12", "Diagnostic incomplete filename observed", observedIncomplete);
@@ -651,7 +653,7 @@ async function testSection12() {
     ]) {
       if (!await exists(targetPath)) continue;
       try {
-        await sharp(targetPath).metadata();
+        await sharp(targetPath).raw().toBuffer();
       } catch {
         finalTargetsAreValid = false;
       }
@@ -662,6 +664,10 @@ async function testSection12() {
       fail("12", "Published targets are absent or decodable");
     }
   } finally {
+    try {
+      incompleteObserver?.close();
+    } catch {}
+    incompleteObserver = undefined;
     if (child && child.exitCode === null) {
       child.kill("SIGKILL");
       await new Promise((resolveExit) => child.once("exit", resolveExit));
