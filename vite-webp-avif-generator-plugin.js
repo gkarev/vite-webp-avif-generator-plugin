@@ -1,6 +1,6 @@
 import { resolve, dirname, extname, basename, relative, isAbsolute } from "path";
 import { existsSync } from "fs";
-import { readdir, rename, rm } from "fs/promises";
+import { lstat, readdir, rename, rm } from "fs/promises";
 import { cpus } from "os";
 import { randomBytes } from "crypto";
 import { normalizePath } from "vite";
@@ -9,6 +9,9 @@ import chokidar from "chokidar";
 
 const MIN_BULK_CONCURRENCY = 4;
 const LOG_LABEL = "[vite-webp-avif-generator]";
+const INCOMPLETE_FILE_TTL_MS = 24 * 60 * 60 * 1000;
+const INCOMPLETE_FILE_PATTERN =
+  /^.+\.vite-webp-avif-generator\.[0-9a-f]{16}\.incomplete$/;
 
 /**
  * @typedef {Object} PluginConfig
@@ -139,18 +142,22 @@ export default function convertImages(config = {}) {
         logger.error(`${LOG_LABEL} File watcher error: ${error?.message ?? error}`);
       });
 
-      if (enableInitialPass) {
-        watcher.once("ready", () => {
-          const initialPassTask = runInitialPass(
-            watchPaths,
-            handlerOptions,
-            (filePath, overrides) => processFileOnce(filePath, overrides)
-          );
-          void trackTask(initialPassTask).catch((error) => {
-            logger.error(`${LOG_LABEL} Initial pass failed: ${error.message}`);
-          });
+      watcher.once("ready", () => {
+        const startupTask = (async () => {
+          await cleanupStaleIncompleteFiles(watchPaths, resolvedExclude, logger);
+          if (enableInitialPass) {
+            await runInitialPass(
+              watchPaths,
+              handlerOptions,
+              (filePath, overrides) => processFileOnce(filePath, overrides)
+            );
+          }
+        })();
+
+        void trackTask(startupTask).catch((error) => {
+          logger.error(`${LOG_LABEL} Startup processing failed: ${error.message}`);
         });
-      }
+      });
 
       // Close this watcher when *this specific* dev server instance shuts
       // down, by wrapping its own `close()` rather than relying on
@@ -425,6 +432,15 @@ function normalizeComparisonPath(path) {
 }
 
 /**
+ * Check whether a path uses the reserved plugin-owned incomplete filename.
+ * @param {string} filePath - Candidate absolute file path
+ * @returns {boolean}
+ */
+function isPluginOwnedIncompletePath(filePath) {
+  return INCOMPLETE_FILE_PATTERN.test(basename(filePath));
+}
+
+/**
  * Trim leading and trailing slashes.
  * @param {string} value - Raw value
  * @returns {string}
@@ -621,6 +637,52 @@ async function listFilesRecursively(dirPath, logger) {
   }
 
   return files;
+}
+
+/**
+ * Remove stale plugin-owned incomplete files from watched, non-excluded folders.
+ * @param {string[]} watchPaths - Absolute watched folder paths
+ * @param {string[]} exclude - Absolute excluded folder paths
+ * @param {import("vite").Logger} logger - Vite logger
+ * @returns {Promise<void>}
+ */
+async function cleanupStaleIncompleteFiles(watchPaths, exclude, logger) {
+  const filesByFolder = await Promise.all(
+    watchPaths.map((folder) => (existsSync(folder) ? listFilesRecursively(folder, logger) : []))
+  );
+  const candidates = [
+    ...new Map(
+      filesByFolder
+        .flat()
+        .filter(
+          (filePath) =>
+            isPluginOwnedIncompletePath(filePath) &&
+            !isInExcludedFolder(filePath, exclude)
+        )
+        .map((filePath) => [normalizeComparisonPath(filePath), filePath])
+    ).values()
+  ];
+  const staleBefore = Date.now() - INCOMPLETE_FILE_TTL_MS;
+  let removed = 0;
+
+  await runWithConcurrencyLimit(candidates, MIN_BULK_CONCURRENCY, async (filePath) => {
+    try {
+      const fileStats = await lstat(filePath);
+      if (!fileStats.isFile() || fileStats.mtimeMs > staleBefore) return;
+      await rm(filePath);
+      removed += 1;
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        logger.warn(
+          `${LOG_LABEL} Failed to clean incomplete file ${filePath}: ${error.message}`
+        );
+      }
+    }
+  });
+
+  if (removed > 0) {
+    logger.info(`${LOG_LABEL} Removed ${removed} stale incomplete conversion file(s)`);
+  }
 }
 
 /**
