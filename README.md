@@ -1,19 +1,26 @@
 # Vite WebP & AVIF Generator Plugin
 
-Vite plugin for automatic image conversion to WebP and AVIF during dev server runtime.
+Automatically generate WebP and AVIF versions of project images while the Vite
+or Nuxt dev server is running:
 
-## Features
+```text
+photo.jpg -> photo.webp + photo.avif
+```
 
-- Converts newly added images in watched folders
-- Runs a one-time initial pass on server start to convert pre-existing images
-- Skips existing targets to avoid extra work
-- Avoids loops on generated `.webp` and `.avif` files
-- Offers an opt-in collision-safe output naming strategy
-- Runs WebP and AVIF conversions in parallel
-- Publishes converted files atomically and leaves a clearly named `.incomplete` diagnostic after an abrupt interruption
-- Supports Vite `publicDir` when it lives outside Vite `root`
-- Optional `publicDir` override for frameworks (like Nuxt) where Vite's own `publicDir` can't be auto-detected
-- Works in dev only via `apply: 'serve'`
+Generated sidecar files are written next to their sources, remain visible and
+reviewable, and are ready to commit to Git.
+
+## Who Is It For?
+
+Use this plugin when your team:
+
+- keeps images in project folders such as `src/img` or `public/img`;
+- wants generated WebP/AVIF files to be regular version-controlled assets;
+- prefers predictable filenames over import queries or framework components;
+- wants conversion to happen during development instead of production builds.
+
+The plugin creates files only. It does not rewrite imports, HTML, or application
+code, so your application must reference the generated files explicitly.
 
 ## Installation
 
@@ -21,9 +28,9 @@ Vite plugin for automatic image conversion to WebP and AVIF during dev server ru
 npm install -D vite-webp-avif-generator-plugin
 ```
 
-`sharp` and `chokidar` are installed automatically as regular dependencies.
+Sharp and Chokidar are installed automatically as regular dependencies.
 
-## Basic Usage
+## Minimal Configuration
 
 ```js
 // vite.config.js
@@ -35,230 +42,236 @@ export default defineConfig({
 })
 ```
 
-## Nuxt Support
+The default configuration:
 
-Nuxt always sets Vite's own `publicDir` option to `false`, on both the client and
-server/SSR dev servers it creates, regardless of `srcDir`. This is enforced by Nuxt
-itself (`vite.publicDir` is deliberately not configurable — see the
-[Nuxt config reference](https://nuxt.com/docs/api/nuxt-config#publicdir)), so the
-plugin cannot auto-detect a real `publicDir` in Nuxt the way it can in a standard Vite
-project.
+- watches `src/img` and `public/img`;
+- generates WebP and AVIF;
+- processes existing images once when the dev server starts;
+- uses Sharp's native output defaults.
 
-As a result, relative `public/img`-style paths in `folders`/`exclude` are **not**
-reliable in Nuxt on their own — they resolve against Vite `root` (which Nuxt sets to
-`srcDir`), not against the project's actual `public/` directory. If `srcDir` differs
-from the project root, this silently resolves to a folder that doesn't exist, and the
-initial pass logs `processed 0`.
+## Using Generated Files
 
-Use the `publicDir` option to point the plugin at the real public directory explicitly:
+The plugin creates the image files but leaves delivery and fallback markup under
+your control. The example below assumes the files are generated in `public/img`.
+Files under `src` must be imported through Vite as usual.
 
-```ts
+```html
+<picture>
+  <source srcset="/img/photo.avif" type="image/avif">
+  <source srcset="/img/photo.webp" type="image/webp">
+  <img src="/img/photo.jpg" alt="">
+</picture>
+```
+
+## Adding to an Existing Project
+
+On the first `npm run dev`, the enabled initial pass scans the configured folders
+recursively and creates every missing WebP/AVIF target next to its source. In a
+project with many existing images, this can add many new files to the working tree
+and temporarily use noticeable CPU.
+
+Before the first run:
+
+1. Start with a clean Git working tree.
+2. Review `folders` and `exclude`.
+3. Choose `outputNaming` before generating files. Use `'preserve'` when same-name
+   sources such as `logo.jpg` and `logo.png` may share a directory.
+4. Start the dev server, review the conversion summary and generated images, then
+   commit the accepted sidecar files.
+
+Existing WebP/AVIF targets are skipped without checking whether they are current.
+To regenerate them after changing a source or Sharp option, delete the targets and
+restart the dev server. Set `enableInitialPass: false` when only files added after
+startup should be processed.
+
+## Why Dev Mode?
+
+The plugin intentionally runs only with the Vite dev server (`apply: 'serve'`).
+
+- Developers see conversion errors immediately.
+- Generated assets can be inspected and committed with their sources.
+- Production builds do not run Sharp or modify the source tree.
+- CI and deployment do not need to regenerate already committed images.
+- The plugin does not transform Vite modules or add browser runtime code.
+
+Use a build-time optimizer instead when generated images should exist only inside
+`dist` and should not be committed to the repository.
+
+## Full Configuration
+
+```js
+// vite.config.js
 import { resolve } from 'node:path'
+import { defineConfig } from 'vite'
+import convertImages from 'vite-webp-avif-generator-plugin'
 
-convertImages({
-  folders: ['src/assets/img', 'public/img'],
-  exclude: ['public/img/generated'],
-  publicDir: resolve(process.cwd(), 'public'),
+export default defineConfig({
+  plugins: [
+    convertImages({
+      folders: ['src/img', 'public/img'],
+      exclude: ['src/img/ignored', 'public/img/ignored'],
+      enableAvif: true,
+      enableInitialPass: true,
+      outputNaming: 'preserve',
+
+      // Optional in standard Vite. Set explicitly for public/... paths in Nuxt.
+      publicDir: resolve(process.cwd(), 'public'),
+
+      // Passed unchanged to sharp().webp().
+      webpOptions: {
+        quality: 82,
+        effort: 5,
+        smartSubsample: true,
+      },
+
+      // Passed unchanged to sharp().avif().
+      avifOptions: {
+        quality: 48,
+        effort: 4,
+        chromaSubsampling: '4:2:0',
+      },
+    }),
+  ],
 })
 ```
 
-This is especially useful for setups like:
+## Nuxt
+
+Nuxt exposes Vite's `publicDir` as `false`. When watching `public/...` paths,
+set the plugin's `publicDir` explicitly:
 
 ```ts
+// nuxt.config.ts
+import { resolve } from 'node:path'
+import convertImages from 'vite-webp-avif-generator-plugin'
+
 export default defineNuxtConfig({
-  srcDir: './src',
+  vite: {
+    plugins: [
+      convertImages({
+        folders: ['src/img', 'public/img'],
+        publicDir: resolve(process.cwd(), 'public'),
+        outputNaming: 'preserve',
+      }),
+    ],
+  },
 })
 ```
 
-If you see `processed 0` in the initial-pass summary, or a
-`Warning: watched folder "..." resolved to ..., but it does not exist` log line, check
-the resolved path logged at startup and set `publicDir` (or use an absolute path in
-`folders`) to fix it.
+This is especially important when Nuxt uses a custom `srcDir`. At startup, the
+plugin logs every configured folder next to its resolved path and warns when a
+watched folder does not exist. If the initial pass reports `processed 0`, check
+these paths first.
 
-The file watcher is closed by wrapping the dev server's own `close()` method, so
-cleanup does not depend on `server.httpServer` (which is `null` in Nuxt's middleware
-mode). Nuxt actually runs two separate Vite dev servers from the same plugin instance
-(one for the client build, one for the server/SSR build); because cleanup is scoped to
-each server instance individually, both watchers are closed independently with no
-leaks, whether the dev server shuts down or restarts in the same process.
+With a custom Nuxt `srcDir`, configure non-public source folders relative to that
+directory. For example, use `assets/img` when `srcDir` is `./src` and the physical
+folder is `src/assets/img`.
+
+Nuxt runs separate Vite client and SSR dev servers. The plugin manages their
+watchers independently and closes them on shutdown or restart.
 
 ## Options
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `folders` | `string[]` | `['src/img', 'public/img']` | Folders to watch |
-| `exclude` | `string[]` | `[]` | Folders to exclude |
-| `enableAvif` | `boolean` | `true` | Enable AVIF conversion |
-| `enableInitialPass` | `boolean` | `true` | Run a one-time conversion pass for existing files on server start |
-| `outputNaming` | `'replace' \| 'preserve'` | `'replace'` | Choose whether generated names replace or preserve the source extension |
-| `publicDir` | `string` | _(unset)_ | Explicit public directory used to resolve `public/...`-style `folders`/`exclude` entries, overriding Vite's own `publicDir` detection. Required for reliable Nuxt support (see [Nuxt Support](#nuxt-support)). |
-| `webpOptions` | `import('sharp').WebpOptions` | _(unset)_ | Native options passed unchanged to Sharp's `.webp()` method |
-| `avifOptions` | `import('sharp').AvifOptions` | _(unset)_ | Native options passed unchanged to Sharp's `.avif()` method |
+| `folders` | `string[]` | `['src/img', 'public/img']` | Folders to watch recursively |
+| `exclude` | `string[]` | `[]` | Folders excluded from conversion |
+| `enableAvif` | `boolean` | `true` | Generate AVIF files |
+| `enableInitialPass` | `boolean` | `true` | Process existing files once on dev server startup |
+| `outputNaming` | `'replace' \| 'preserve'` | `'replace'` | Replace or preserve the source extension in generated names |
+| `publicDir` | `string` | unset | Explicit public directory for `public/...` paths |
+| `webpOptions` | `import('sharp').WebpOptions` | unset | Native options passed to `sharp().webp()` |
+| `avifOptions` | `import('sharp').AvifOptions` | unset | Native options passed to `sharp().avif()` |
 
-### Native Sharp output options
+See Sharp's
+[`webp()` and `avif()` documentation](https://sharp.pixelplumbing.com/api-output/)
+for the supported output options. Arbitrary Sharp pipeline operations such as
+`resize()`, `rotate()`, or metadata transforms are not accepted here.
 
-`webpOptions` and `avifOptions` accept the same native option objects as Sharp's
-[`webp()` and `avif()` output methods](https://sharp.pixelplumbing.com/api-output/).
-The plugin passes these objects to Sharp unchanged and does not define its own compression
-defaults.
+## Supported Formats
 
-```js
-convertImages({
-  webpOptions: {
-    quality: 82,
-    effort: 5,
-    smartSubsample: true,
-  },
-  avifOptions: {
-    quality: 48,
-    effort: 4,
-    chromaSubsampling: '4:2:0',
-  },
-})
-```
+| Source | Generated output |
+| --- | --- |
+| `.jpg`, `.jpeg`, `.png` | WebP and optional AVIF |
+| `.webp` | Optional AVIF only |
 
-This makes an existing direct Sharp setup easy to migrate:
+SVG is not supported and SVG files are ignored. Use a dedicated SVGO-based Vite
+plugin when you need SVG minification or optimization.
 
-```js
-// Direct Sharp usage:
-await sharp(input).webp(webpOptions).toFile(target)
+## Important Behavior
 
-// Equivalent plugin configuration:
-convertImages({ webpOptions })
-```
+### Existing targets
 
-Both fields are optional. When omitted, Sharp uses its own defaults, preserving the
-plugin's previous output behavior. The exact available properties follow the installed
-supported Sharp version.
+Existing targets are never overwritten. To apply source or Sharp option changes,
+delete the generated targets and restart the dev server.
 
-The migration covers Sharp's WebP/AVIF output-method options only. Arbitrary pipeline
-operations such as `resize()`, `rotate()`, `flatten()`, or metadata transforms are not
-part of these configuration objects.
+### Output names and collisions
 
-Existing targets are still skipped. If you change an option and want to regenerate an
-already-created `.webp` or `.avif`, delete that target file and let the initial pass or
-watcher create it again. A standalone `.webp` source is not re-encoded as WebP, so only
-`avifOptions` applies to its generated AVIF sibling.
-
-### Output file names and collisions
-
-The default `outputNaming: 'replace'` keeps the existing filename contract:
+The default `outputNaming: 'replace'` creates:
 
 ```text
-logo.png -> logo.webp, logo.avif
+logo.png -> logo.webp + logo.avif
 ```
 
-Because the original extension is removed, distinct sources with the same basename in
-one directory, such as `logo.png` and `logo.jpg`, map to the same output files. The
-initial pass reports a warning for each colliding target. Use the opt-in
-`outputNaming: 'preserve'` strategy when both sources must have independent derivatives:
+Distinct `logo.png` and `logo.jpg` sources therefore collide. The initial pass
+reports this and recommends collision-safe naming:
 
 ```js
-convertImages({
-  outputNaming: 'preserve',
-})
+convertImages({ outputNaming: 'preserve' })
 ```
 
 ```text
-logo.png -> logo.png.webp, logo.png.avif
-logo.jpg -> logo.jpg.webp, logo.jpg.avif
+logo.png -> logo.png.webp + logo.png.avif
+logo.jpg -> logo.jpg.webp + logo.jpg.avif
 hero.webp -> hero.webp.avif
 ```
 
-The default remains `replace` for backward compatibility with existing asset URLs.
+`replace` remains the default for backward compatibility with existing asset URLs.
+
+### Initial pass and live watching
+
+The watcher starts before the recursive initial pass, so startup additions are not
+missed. Processing uses bounded concurrency, ignores symlinks, deduplicates
+overlapping folders, and skips existing targets without invoking Sharp. Set
+`enableInitialPass: false` to process only new files.
+
+### Atomic output and interrupted conversions
+
+Each result is staged beside its target:
+
+```text
+image.webp.vite-webp-avif-generator.a1b2c3d4e5f60708.incomplete
+```
+
+The file is renamed only after Sharp succeeds. An `.incomplete` file left by an
+abrupt interruption is diagnostic and must not be committed as an image. Startup
+cleanup removes only exact plugin-owned files older than 24 hours; fresh, foreign,
+excluded, and symlinked entries are preserved. Shutdown waits for registered work.
 
 ## Path Resolution
 
 - Absolute paths are used as-is.
 - Relative paths are resolved from Vite `root`.
-- Paths that start with the configured public directory name, for example `public/img`, are resolved from the parent of the effective `publicDir` — the `publicDir` option if set, otherwise Vite's own detected `publicDir`.
+- Paths beginning with the configured public directory name are resolved from the
+  parent of the effective `publicDir`.
 
-This keeps the plugin compatible with standard Vite apps. In frameworks like Nuxt,
-where Vite's own `publicDir` is always `false`, set the `publicDir` option explicitly
-to keep `public/...` paths working — see [Nuxt Support](#nuxt-support).
+All plugin output goes through Vite's logger and respects `logLevel` and
+`clearScreen`.
 
-At startup, the plugin logs each configured folder next to its resolved absolute path,
-and warns if a resolved folder doesn't exist on disk — use this to verify resolution
-before relying on the initial pass.
+## Scope
 
-## Supported Formats
+The plugin does not provide:
 
-Input:
-- `.jpg`
-- `.jpeg`
-- `.png`
-- `.webp`
-
-Output:
-- `.webp` when source is not already WebP
-- `.avif` when `enableAvif` is `true`
-
-## Behavior
-
-On each new file:
-1. Check supported extension
-2. Check excluded folders
-3. Skip generated `.webp` and `.avif` files
-4. Build conversion tasks
-5. Run conversions with `Promise.allSettled`
-6. Log success and error counts
-
-Files are converted atomically. Each output is first written beside its target with a
-name such as
-`image.webp.vite-webp-avif-generator.a1b2c3d4e5f60708.incomplete`, then renamed to
-`image.webp` only after Sharp finishes successfully. Vite and the watcher do not treat
-the `.incomplete` suffix as an image source.
-
-Ordinary caught errors remove their staging file best-effort. If the process is stopped
-abruptly, for example with `SIGKILL`, cleanup cannot run and the self-describing file may
-remain in the working tree. It is intentionally not covered by a plugin-specific
-`.gitignore` rule: its presence tells the developer that publication did not complete,
-and it must not be used or committed as an image.
-
-Whenever the watcher becomes ready, the plugin removes only files matching its exact
-owned `.incomplete` pattern that are at least 24 hours old. Fresh files, arbitrary
-`.incomplete` or `.tmp` files, excluded folders, and symlinks are left untouched.
-
-### Initial Pass
-
-When the dev server starts, the plugin registers the file watcher first (so files added
-while the pass is running are still picked up live), waits for the watcher's `ready`
-event so live watching is fully active, then runs a one-time pass over all files already
-present in the watched folders, applying the same filters and idempotency checks as live
-additions (existing targets are skipped without invoking `sharp`). The pass recurses into
-subfolders, does not follow symlinks, limits how many conversions run concurrently, and
-deduplicates physical source paths when watched folders overlap. It finishes with a
-single summary log line (processed/converted/skipped/failed).
-
-Set `enableInitialPass: false` to disable this pass and only convert files added while
-the server is running.
-
-When the Vite dev server closes or restarts, its watcher stops accepting new work and
-`server.close()` waits for already registered live and initial-pass conversions before
-the shutdown completes.
+- build-time image optimization;
+- resizing, `srcset`, or LQIP generation;
+- SVG optimization;
+- CDN delivery or runtime transformations;
+- import-query or framework-component integration.
 
 ## Compatibility
 
-- Vite `4.x` to `8.x`
-- Nuxt projects powered by Vite, including `srcDir` setups (set the `publicDir` option, see [Nuxt Support](#nuxt-support))
+- Node `20.19+`
+- Vite `4.x` through `8.x`
+- Nuxt projects powered by Vite, including custom `srcDir` setups
+- Sharp `0.35+`
 - Chokidar `3.5.3+`, `4.x`, and `5.x`
-- Sharp `0.35+` (the minimum excludes vulnerable Sharp/libvips versions)
-- Node `20.19+`, regardless of which supported Vite major you use
-
-The plugin declares `"engines": { "node": ">=20.19.0" }` unconditionally, so this Node
-requirement applies even if your project uses an older Vite major (`4.x`-`6.x`) that
-itself supports lower Node versions.
-
-## Logging
-
-Dev output goes through Vite's own logger, so it respects Vite's `logLevel` and
-`clearScreen` settings (for example, `logLevel: 'silent'` suppresses the plugin's logs
-while conversions still run). Every top-level message is prefixed with
-`[vite-webp-avif-generator]`; per-format lines (`WEBP`/`AVIF`) are indented and
-intentionally left unprefixed.
-
-## Notes
-
-- The plugin is intentionally dev-only.
-- The main conversion flow is file-system based and does not transform Vite modules.
-- If you change runtime behavior, update the runtime file, typings, and README together.

@@ -1,7 +1,7 @@
 {
   "name": "vite-webp-avif-generator-plugin",
   "version": "2.4.0",
-  "description": "Vite plugin for automatic image conversion to WebP and AVIF formats in dev mode",
+  "description": "Automatically converts JPG and PNG images to commit-ready WebP and AVIF files during Vite and Nuxt development",
   "author": "Karev G.S.",
   "license": "MIT",
   "type": "module",
@@ -27,7 +27,13 @@
     "avif",
     "image",
     "image-conversion",
+    "image-converter",
+    "image-generator",
     "image-optimizer",
+    "jpeg-to-webp",
+    "jpg-to-webp",
+    "nuxt",
+    "png-to-webp",
     "sharp",
     "dev-tools"
   ],
