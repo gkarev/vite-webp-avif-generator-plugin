@@ -31,8 +31,10 @@ coverage/
 .cache/
 temp/
 tmp/
-playground/
 
 *.md
 !README.md
 !CHANGELOG.md
+!PUBLISHING.md
+!docs/**/*.md
+*.log

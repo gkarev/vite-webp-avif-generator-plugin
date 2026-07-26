@@ -1,0 +1,11 @@
+{
+  "name": "nuxt4-watcher-cleanup-check",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxi dev"
+  },
+  "devDependencies": {
+    "nuxt": "4.4.8"
+  }
+}
